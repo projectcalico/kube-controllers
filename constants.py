@@ -33,12 +33,12 @@ NET_POL_TIER_ORDER = 1000
 
 # The priority assigned to network policies created by the controller.
 # Lower order -> higher priority.
-NET_POL_ORDER = 1000
+NET_POL_ORDER = int(os.getenv("NET_POL_ORDER", 1000))
 
-# The priority assigned to the backstop policy that applies
-# to traffic which doesn't match one of the configured policies
-# in the NET_POL_TIER_NAME tier.
-NET_POL_BACKSTOP_ORDER = 2000
+# The priority used for policies created by Namespaces.
+NET_POL_NAMESPACE_ORDER = None
+if os.getenv("NAMESPACE_POLICY_ORDER"):
+    NET_POL_NAMESPACE_ORDER = int(os.getenv("NAMESPACE_POLICY_ORDER"))
 
 # Environment variables for getting the Kubernetes API.
 K8S_SERVICE_PORT = "KUBERNETES_SERVICE_PORT"
@@ -49,6 +49,9 @@ K8S_NAMESPACE_LABEL = "calico/k8s_ns"
 
 # Format to use for namespace profile names.
 NS_PROFILE_FMT = "k8s_ns.%s"
+
+# Format to use for namespace policy names.
+NS_POLICY_FMT = "ns.projectcalico.org/%s"
 
 # Format to use for labels inherited from a namespace.
 NS_LABEL_KEY_FMT = "k8s_ns/label/%s"

@@ -40,9 +40,6 @@ def add_update_namespace(namespace):
     _log.debug("Namespace %s has %s.  Isolate=%s",
             namespace_name, ingress_isolation, isolate_ns)
 
-    # Determine the profile name to create.
-    profile_name = NS_PROFILE_FMT % namespace_name
-
     # Determine the rules to use.
     outbound_rules = [Rule(action="allow")]
     if isolate_ns:
@@ -52,6 +49,16 @@ def add_update_namespace(namespace):
     rules = Rules(inbound_rules=inbound_rules,
                   outbound_rules=outbound_rules)
 
+    # Create a Policy which applies the Rules for this Namespace.
+    policy_name = NS_POLICY_FMT % namespace_name
+    selector = "%s == '%s'" % (K8S_NAMESPACE_LABEL, namespace_name)
+    client.create_policy("default",
+                         policy_name,
+                         selector,
+                         order=NET_POL_NAMESPACE_ORDER,
+                         rules=rules)
+    _log.debug("Created/updated policy for namespace %s", namespace_name)
+
     # Assign labels to the profile.  We modify the keys to use
     # a special prefix to indicate that these labels are inherited
     # from the namespace.
@@ -59,23 +66,28 @@ def add_update_namespace(namespace):
     labels = {NS_LABEL_KEY_FMT % k: v for k, v in ns_labels.iteritems()}
     _log.debug("Generated namespace labels: %s", labels)
 
-    # Create the Calico profile to represent this namespace, or
-    # update it if it already exists.
-    client.create_profile(profile_name, rules, labels)
-
+    # Create/Update a Profile which applies the labels for this Namespace.
+    profile_name = NS_PROFILE_FMT % namespace_name
+    client.create_profile(profile_name, Rules([], []), labels)
     _log.debug("Created/updated profile for namespace %s", namespace_name)
-
 
 def delete_namespace(namespace):
     """
     Takes a deleted namespace and removes the corresponding
     configuration from the Calico datastore.
     """
-    # Delete the Calico policy which represents this namespace.
+    # Delete the Calico profile which represents this namespace.
     namespace_name = namespace["metadata"]["name"]
     profile_name = NS_PROFILE_FMT % namespace_name
     _log.debug("Deleting namespace profile: %s", profile_name)
     try:
         client.remove_profile(profile_name)
     except KeyError:
-        _log.info("Unable to find profile for namespace '%s'", namespace_name)
+        _log.info("Profile already deleted for namespace '%s'", namespace_name)
+
+    # Delete the Calico policy for this Namespace.
+    policy_name = NS_POLICY_FMT % namespace_name
+    try:
+        client.remove_policy("default", policy_name)
+    except KeyError:
+        _log.info("Policy already deleted for namespace '%s'", namespace_name)
