@@ -164,17 +164,12 @@ class Controller(object):
         metadata = {"order": NET_POL_TIER_ORDER}
         self._client.set_policy_tier_metadata("default", metadata)
 
-        # Ensure the backstop policy exists.  This policy forwards
-        # any traffic to Kubernetes pods which doesn't match another policy
-        # to the next-tier (i.e the per-namespace Profiles).
-        selector = "has(%s)" % K8S_NAMESPACE_LABEL
-        rules = Rules(inbound_rules=[Rule(action="next-tier")],
-                      outbound_rules=[Rule(action="next-tier")])
-        self._client.create_policy("default",
-                                   "k8s-policy-no-match",
-                                   selector,
-                                   order=NET_POL_BACKSTOP_ORDER,
-                                   rules=rules)
+        # Clean up the k8s-policy-no-match policy which was created by
+        # old versions of the policy controller.
+        try:
+            self._client.remove_policy("default", "k8s-policy-no-match")
+        except KeyError:
+            pass
 
         # Read initial state from Kubernetes API.
         self.start_workers()
