@@ -1,0 +1,13 @@
+apiVersion: "projectcalico.org/v1"
+kind: Egresspolicy
+metadata:
+  name: test-egress
+  namespace: app1
+spec:
+  podSelector:
+    matchLabels:
+      run: nginx 
+  egress:
+  - ports:
+    - protocol: icmp
+    

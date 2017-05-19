@@ -47,22 +47,38 @@ def add_update_namespace(namespace):
     try:
         ingress_isolation = policy_annotation.get("ingress", {}).get("isolation", "")
     except AttributeError:
-        _log.exception("Invalid namespace annotation: %s", policy_annotation)
+        _log.exception("Invalid namespace Ingress annotation: %s", policy_annotation)
         return
 
-    isolate_ns = ingress_isolation == "DefaultDeny"
-    _log.debug("Namespace %s has %s.  Isolate=%s",
-            namespace_name, ingress_isolation, isolate_ns)
+    try:
+        egress_isolation = policy_annotation.get("egress", {}).get("isolation", "")
+    except AttributeError:
+        _log.exception("Invalid namespace Egress annotation: %s", policy_annotation)
+        return
+
+    isolate_ns_ingress = ingress_isolation == "DefaultDeny"
+    _log.debug("Namespace %s has Ingress %s.  Isolate=%s",
+            namespace_name, ingress_isolation, isolate_ns_ingress)
+
+    isolate_ns_egress = egress_isolation == "DefaultDeny"
+    _log.debug("Namespace %s has Egress %s.  Isolate=%s",
+            namespace_name, egress_isolation, isolate_ns_egress)
+
 
     # Determine the profile name to create.
     profile_name = NS_PROFILE_FMT % namespace_name
 
     # Determine the rules to use.
-    outbound_rules = [Rule(action="allow")]
-    if isolate_ns:
+    if isolate_ns_ingress:
         inbound_rules = [Rule(action="deny")]
     else:
         inbound_rules = [Rule(action="allow")]
+
+    if isolate_ns_egress:
+        outbound_rules = [Rule(action="deny")]
+    else:
+        outbound_rules = [Rule(action="allow")]
+        
     rules = Rules(inbound_rules=inbound_rules,
                   outbound_rules=outbound_rules)
 

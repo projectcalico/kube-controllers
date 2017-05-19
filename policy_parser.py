@@ -88,6 +88,34 @@ class PolicyParser(object):
         _log.debug("Calculated total set of rules: %s", rules)
         return rules
 
+    def calculate_outbound_rules(self):
+        """
+        Generate Calico Rule objects for this Policy's egress rules.
+
+        Returns a list of Calico datamodel Rules.
+        """
+        _log.debug("Calculating outbound rules")
+        rules = []
+
+        egress_rules = self.policy["spec"].get("egress")
+        if egress_rules:
+            _log.debug("Got %d egress rules: translating to Calico format",
+                       len(egress_rules))
+            for egress_rule in egress_rules:
+                _log.debug("Processing egress rule %s", egress_rule)
+                if egress_rule:
+                    # Convert egress rule into Calico Rules.
+                    _log.debug("Adding rule %s", egress_rule)
+                    rules.extend(self._allow_outgoing_to_rules(egress_rule))
+                else:
+                    # An empty rule means allow all traffic.
+                    _log.debug("Empty rule => allow all; skipping rest")
+                    rules.append(Rule(action="allow"))
+                    break
+
+        _log.debug("Calculated total set of Egress rules: %s", rules)
+        return rules
+
     def _calculate_selectors(self, label_selector, key_format="%s"):
         """
         Generate Calico datamodel selectors for a Kubernetes LabelSelector.
@@ -125,6 +153,43 @@ class PolicyParser(object):
 
         return calico_selectors
 
+    def _allow_outgoing_to_rules(self, allow_outgoing_clause):
+        """
+        Takes a single "allowOutgoing" rule from a NetworkPolicy object
+        and returns a list of Calico Rule object with implement it.
+        """
+        _log.debug("Processing egress rule: %s", allow_outgoing_clause)
+
+        # Generate to "to" arguments for this Rule.
+        ports = allow_outgoing_clause.get("ports")
+        if ports:
+            _log.debug("Parsing 'ports': %s", ports)
+            dstport_args = self._generate_to_args(ports)
+        else:
+            _log.debug("No ports specified, allow all protocols / ports")
+            dstport_args = [{}]
+
+        # Generate "from" arguments for this Rule.
+        destinies = allow_outgoing_clause.get("to")
+        if destinies:
+            _log.debug("Parsing 'to': %s", destinies)
+            destiny_args = self._generate_destiny_args(destinies)
+        else:
+            _log.debug("No to specified, allow to all destinies")
+            destiny_args = [{}]
+
+        # Create a Rule per-protocol, per-from-clause.
+        _log.debug("Creating rules")
+        rules = []
+        for dstport_arg in dstport_args:
+            for destiny_arg in destiny_args:
+                _log.debug("\tAllow to %s in port %s", destiny_arg, dstport_arg)
+                args = {"action": "allow"}
+                args.update(destiny_arg)
+                args.update(dstport_arg)
+                rules.append(Rule(**args))
+        return rules
+
     def _allow_incoming_to_rules(self, allow_incoming_clause):
         """
         Takes a single "allowIncoming" rule from a NetworkPolicy object
@@ -161,6 +226,64 @@ class PolicyParser(object):
                 args.update(to_arg)
                 rules.append(Rule(**args))
         return rules
+
+    def _generate_destiny_args(self, destinies):
+        """
+        Generate an arguments dictionary suitable for passing to
+        the constructor of a libcalico Rule object using the given
+        "destiny" clauses.
+        """
+        destiny_args = []
+        for destiny_clause in destinies:
+            # We need to check if the key exists, not just if there is
+            # a non-null value.  The presence of the key with a null
+            # value means "select all".
+            _log.debug("Parsing 'destiny' clause: %s", destiny_clause)
+            pods_present = "podSelector" in from_clause
+            namespaces_present = "namespaceSelector" in from_clause
+            _log.debug("Is 'podSelector:' present? %s", pods_present)
+            _log.debug("Is 'namespaceSelector:' present? %s", namespaces_present)
+
+            if pods_present and namespaces_present:
+                # This is an error case according to the API.
+                msg = "Policy API does not support both 'pods' and " \
+                      "'namespaces' selectors."
+                raise PolicyError(msg, self.policy)
+            elif pods_present:
+                # There is a pod selector in this "to" clause.
+                pod_selector = destiny_clause["podSelector"] or {}
+                _log.debug("Allow to podSelector: %s", pod_selector)
+                selectors = self._calculate_selectors(pod_selector)
+
+                # We can only select on pods in this namespace.
+                selectors.append("%s == '%s'" % (K8S_NAMESPACE_LABEL,
+                                                 self.namespace))
+                selector = " && ".join(selectors)
+
+                # Append the selector to the to args.
+                _log.debug("Allowing to pods which match: %s", selector)
+                destiny_args.append({"dst_selector": selector})
+            elif namespaces_present:
+                # There is a namespace selector.  Namespace labels are
+                # applied to each pod in the namespace using
+                # the per-namespace profile.  We can select on namespace
+                # labels using the NS_LABEL_KEY_FMT modifier.
+                namespaces = destiny_clause["namespaceSelector"] or {}
+                _log.debug("Allow to namespaceSelector: %s", namespaces)
+                selectors = self._calculate_selectors(namespaces,
+                                                      NS_LABEL_KEY_FMT)
+                selector = " && ".join(selectors)
+                if selector:
+                    # Allow to the selected namespaces.
+                    _log.debug("Allowing to namespaces which match: %s",
+                               selector)
+                    destiny_args.append({"dst_selector": selector})
+                else:
+                    # Allow to  all pods in all namespaces.
+                    _log.debug("Allowing from all pods in all namespaces")
+                    selector = "has(%s)" % K8S_NAMESPACE_LABEL
+                    destiny_args.append({"dst_selector": selector})
+        return destiny_args
 
     def _generate_from_args(self, froms):
         """

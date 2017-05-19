@@ -94,6 +94,14 @@ class Controller(object):
         self.add_handler(RESOURCE_TYPE_NETWORK_POLICY, TYPE_DELETED,
                          delete_network_policy)
 
+        # Handlers for NetworkPolicy events.
+        self.add_handler(RESOURCE_TYPE_EGRESS_POLICY, TYPE_ADDED,
+                         add_update_network_policy)
+        self.add_handler(RESOURCE_TYPE_EGRESS_POLICY, TYPE_MODIFIED,
+                         add_update_network_policy)
+        self.add_handler(RESOURCE_TYPE_EGRESS_POLICY, TYPE_DELETED,
+                         delete_network_policy)
+
         # Handlers for Namespace events.
         self.add_handler(RESOURCE_TYPE_NAMESPACE, TYPE_ADDED,
                          add_update_namespace)
@@ -234,6 +242,7 @@ class Controller(object):
         API resource.
         """
         resources = [RESOURCE_TYPE_NETWORK_POLICY,
+                     RESOURCE_TYPE_EGRESS_POLICY,
                      RESOURCE_TYPE_NAMESPACE,
                      RESOURCE_TYPE_POD]
 

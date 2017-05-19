@@ -25,6 +25,7 @@ CA_CERT_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 
 # Resource types.
 RESOURCE_TYPE_NETWORK_POLICY = "NetworkPolicy"
+RESOURCE_TYPE_EGRESS_POLICY = "Egresspolicy"
 RESOURCE_TYPE_POD = "Pod"
 RESOURCE_TYPE_NAMESPACE = "Namespace"
 
@@ -33,13 +34,21 @@ BETA_API = "%s/apis/extensions/v1beta1"
 NET_POLICY_PATH = BETA_API + "/networkpolicies"
 NET_POLICY_WATCH_PATH = BETA_API + "/watch/networkpolicies"
 
+# API paths to EgressPolicy objects.
+THIRDPARTY_API = "%s/apis/projectcalico.org/v1"
+EGRESS_POLICY_PATH = THIRDPARTY_API + "/egresspolicies"
+EGRESS_POLICY_WATCH_PATH = THIRDPARTY_API + "/watch/egresspolicies"
+
 # Mapping of resource to api URL.
 GET_URLS = {RESOURCE_TYPE_POD: "%s/api/v1/pods",
             RESOURCE_TYPE_NAMESPACE: "%s/api/v1/namespaces",
-            RESOURCE_TYPE_NETWORK_POLICY: NET_POLICY_PATH}
+            RESOURCE_TYPE_NETWORK_POLICY: NET_POLICY_PATH,
+            RESOURCE_TYPE_EGRESS_POLICY: EGRESS_POLICY_PATH}
+
 WATCH_URLS = {RESOURCE_TYPE_POD: "%s/api/v1/watch/pods",
               RESOURCE_TYPE_NAMESPACE: "%s/api/v1/watch/namespaces",
-              RESOURCE_TYPE_NETWORK_POLICY: NET_POLICY_WATCH_PATH}
+              RESOURCE_TYPE_NETWORK_POLICY: NET_POLICY_WATCH_PATH,
+              RESOURCE_TYPE_EGRESS_POLICY: EGRESS_POLICY_WATCH_PATH}
 
 # Annotation to look for network-isolation on namespaces.
 NS_POLICY_ANNOTATION = "net.beta.kubernetes.io/network-policy"

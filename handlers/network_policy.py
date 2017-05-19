@@ -40,6 +40,7 @@ def add_update_network_policy(policy):
         parser = PolicyParser(policy)
         selector = parser.calculate_pod_selector()
         inbound_rules = parser.calculate_inbound_rules()
+        outbound_rules = parser.calculate_outbound_rules()
     except Exception:
         # If the Policy is malformed, log the error and kill the controller.
         # Kubernetes will restart us.
@@ -48,7 +49,7 @@ def add_update_network_policy(policy):
         os.exit(1)
     else:
         rules = Rules(inbound_rules=inbound_rules,
-                      outbound_rules=[Rule(action="allow")])
+                      outbound_rules=outbound_rules)
 
         # Create the network policy using the calculated selector and rules.
         client.create_policy("default",
