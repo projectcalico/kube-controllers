@@ -1,32 +1,32 @@
 package main
 
 import (
-	"flag"
 	glog "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/controller"
+	Config "github.com/projectcalico/k8s-policy/pkg/config"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/namespace"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 func main() {
 
-	var kubeconfig string
-	var master string
-
-	glog.SetLevel(glog.DebugLevel)
-
-	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
-	flag.StringVar(&master, "master", "", "master url")
-	flag.Parse()
-
-	// creates the connection
-	k8sconfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
+	var config Config.Config
+	err := config.Parse()
 	if err != nil {
-		glog.Fatal(err)
+			panic(err.Error())
 	}
+	glog.Debugf("Parsed config variables: %#v\n", config)
+
+	//c, err := client.LoadClientConfigFromEnvironment()
+	//c, err := client.NewFromEnv()
+	restConfig, err := config.K8sClusterConfig()
+	if err != nil {
+			panic(err.Error())
+	}
+	config.ConfigEtcHostsIfRequired()
+
 	var controller controller.Controller
-	controller = namespace.NewNamespaceController(k8sconfig)
+	controller = namespace.NewNamespaceController(restConfig)
 
 	stop := make(chan struct{})
 	defer close(stop)
