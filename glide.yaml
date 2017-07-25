@@ -1,4 +1,4 @@
-package: github.com/girishshilamkar/k8s-policy-go
+package: github.com/projectcalico/k8s-policy
 description: Calico Policy Controller
 homepage: https://projectcalico.org
 license: Apache-2.0

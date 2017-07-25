@@ -1,5 +1,5 @@
-hash: 5b6e43b0d079f90ffd31b5d9bb91ef66a08d3b0d3a7d6dbc9f7e3742e017328d
-updated: 2017-07-17T11:47:04.315698843+01:00
+hash: b1fb1b007a0ce9fc288a47697a680c62ab1aebf6fd0d0cc81da8c4fb2a6dcfc0
+updated: 2017-07-21T10:58:20.299817258+01:00
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -166,10 +166,9 @@ imports:
   subpackages:
   - unix
 - name: golang.org/x/text
-  version: 19e51611da83d6be54ddafce4a4af510cb3e9ea4
+  version: 2910a502d2bf9e43193af9d68ca516529614eed3
   subpackages:
   - cases
-  - internal
   - internal/tag
   - language
   - runes
@@ -204,6 +203,7 @@ imports:
 - name: k8s.io/apimachinery
   version: b317fa7ec8e0e7d1f77ac63bf8c3ec7b29a2a215
   subpackages:
+  - pkg/api/equality
   - pkg/api/errors
   - pkg/api/meta
   - pkg/api/resource
@@ -230,18 +230,22 @@ imports:
   - pkg/util/diff
   - pkg/util/errors
   - pkg/util/framer
+  - pkg/util/httpstream
   - pkg/util/intstr
   - pkg/util/json
+  - pkg/util/mergepatch
   - pkg/util/net
   - pkg/util/rand
   - pkg/util/runtime
   - pkg/util/sets
+  - pkg/util/strategicpatch
   - pkg/util/validation
   - pkg/util/validation/field
   - pkg/util/wait
   - pkg/util/yaml
   - pkg/version
   - pkg/watch
+  - third_party/forked/golang/json
   - third_party/forked/golang/reflect
 - name: k8s.io/client-go
   version: 4a3ab2f5be5177366f8206fd79ce55ca80e417fa
