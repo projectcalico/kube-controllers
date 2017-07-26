@@ -4,5 +4,5 @@ package controller
 type Controller interface {
 
 	// Run method
-	Run(threadiness int, stopCh chan struct{})
+	Run(threadiness int, reconcilerPeriod string, stopCh chan struct{})
 }

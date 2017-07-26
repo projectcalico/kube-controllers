@@ -1,13 +1,14 @@
 package namespace
 
 import (
-	"fmt"
+	"reflect"
 	glog "github.com/Sirupsen/logrus"
 	calicocache "github.com/projectcalico/k8s-policy/pkg/cache"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/controller"
 	"github.com/projectcalico/k8s-policy/pkg/converter"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/client"
+	"github.com/projectcalico/libcalico-go/lib/errors"
 	"k8s.io/apimachinery/pkg/fields"
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -32,6 +33,7 @@ type NamespaceController struct {
 // NewNamespaceController Constructor for NamespaceController
 func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 
+	// Get kubenetes clientset
 	clientset, err := kubernetes.NewForConfig(k8sConfig)
 	if err != nil {
 		panic(err.Error())
@@ -41,6 +43,8 @@ func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 	if err != nil {
 		panic(err)
 	}
+
+	// Get Calico client
 	cclient, err := client.New(*cconfig)
 	if err != nil {
 		panic(err)
@@ -82,9 +86,9 @@ func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 		ListFunc:   listFunc,
 		KeyFunc:    keyFunc,
 		Client:     cclient,
-		ObjectType: "*api.Profile", // Restrict cache to store pointers to calico profile objects only.
+		ObjectType: reflect.TypeOf(&api.Profile{}), // Restrict cache to store pointers to calico profile objects only.
 	}
-
+	
 	ccache := calicocache.NewResourceCache(cacheArgs)
 	namespaceConverter := converter.NewNamespaceConverter()
 
@@ -95,19 +99,22 @@ func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 	// whenever the kubernetes cache is updated, changes get reflected in calico cache as well.
 	indexer, informer := cache.NewIndexerInformer(listWatcher, &v1.Namespace{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-
+			
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			glog.Infof("Got ADD event for namespace: %s\n", key)
 
-			if err == nil {
-				profile, conversionErr := namespaceConverter.Convert(obj)
-				if conversionErr != nil {
-					glog.Errorf("Error while converting %#v to calico profile.", obj)
-					return
-				}
-				// Add profileName:*profile in calicoCache
-				ccache.Set(profile.(*api.Profile).Metadata.Name, profile)
+			if err != nil {
+				glog.Error(err)
+				return
 			}
+
+			profile, conversionErr := namespaceConverter.Convert(obj)
+			if conversionErr != nil {
+				glog.Errorf("Error while converting %#v to calico profile.", obj)
+				return
+			}
+			// Add profileName:*profile in calicoCache
+			ccache.Set(profile.(*api.Profile).Metadata.Name, profile)		
 		},
 		UpdateFunc: func(oldObj interface{}, newObj interface{}) {
 
@@ -117,24 +124,26 @@ func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 			glog.Debugf("Old object: %#v\n", oldObj)
 			glog.Debugf("New object: %#v\n", newObj)
 
-			if err == nil {
-
-				if newObj.(*v1.Namespace).Status.Phase == "Terminating" {
-					// If object status is updated to "Terminating", object
-					// is getting deleted. Ignore this event. When deletion
-					// completes another DELETE event will be raised.
-					// Let DeleteFunc handle that.
-					glog.Debug("Namespace %s is getting deleted.", newObj.(*v1.Namespace).ObjectMeta.GetName())
-					return
-				}
-				profile, conversionErr := namespaceConverter.Convert(newObj)
-				if conversionErr != nil {
-					glog.Errorf("Error while converting %#v to calico profile.", newObj)
-					return
-				}
-				// Add profileName:profile in calicoCache
-				ccache.Set(profile.(*api.Profile).Metadata.Name, profile)
+			if err != nil {
+				glog.Error(err)
+				return
 			}
+
+			if newObj.(*v1.Namespace).Status.Phase == "Terminating" {
+				// If object status is updated to "Terminating", object
+				// is getting deleted. Ignore this event. When deletion
+				// completes another DELETE event will be raised.
+				// Let DeleteFunc handle that.
+				glog.Debugf("Namespace %s is getting deleted.", newObj.(*v1.Namespace).ObjectMeta.GetName())
+				return
+			}
+			profile, conversionErr := namespaceConverter.Convert(newObj)
+			if conversionErr != nil {
+				glog.Errorf("Error while converting %#v to calico profile.", newObj)
+				return
+			}
+			// Add profileName:profile in calicoCache
+			ccache.Set(profile.(*api.Profile).Metadata.Name, profile)			
 		},
 		DeleteFunc: func(obj interface{}) {
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
@@ -143,21 +152,26 @@ func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 			glog.Infof("Got DELETE event for namespace: %s\n", key)
 
-			if err == nil {
-				calicoKey := fmt.Sprintf(converter.ProfileNameFormat+"%s", key)
-				ccache.Delete(calicoKey)
+			if err != nil {
+				glog.Error(err)
+				return
 			}
+
+			profile, conversionErr := namespaceConverter.Convert(obj)
+			if conversionErr != nil {
+				glog.Errorf("Error while converting %#v to calico profile.", obj)
+				return
+			}
+			ccache.Delete(profile.(*api.Profile).Metadata.Name)		
 		},
 	}, cache.Indexers{})
-
-	ccache.SetIndexer(indexer)
 
 	return &NamespaceController{indexer, informer, ccache, cclient}
 }
 
 // Run starts controller.Internally it starts syncing
 // kubernetes and calico caches.
-func (c *NamespaceController) Run(threadiness int, stopCh chan struct{}) {
+func (c *NamespaceController) Run(threadiness int, reconcilerPeriod string, stopCh chan struct{}) {
 	defer uruntime.HandleCrash()
 
 	// Let the workers stop when we are done
@@ -168,15 +182,12 @@ func (c *NamespaceController) Run(threadiness int, stopCh chan struct{}) {
 
 	// Start Calico cache. Cache gets loaded with objects
 	// from ETCD datastore.
-	c.calicoObjCache.Run(stopCh)
+	c.calicoObjCache.Run(stopCh, reconcilerPeriod)
 
 	go c.informer.Run(stopCh)
 
-	// Wait for all involved caches to be synced, before processing items from the queue is started
-	if !cache.WaitForCacheSync(stopCh, c.informer.HasSynced) {
-		uruntime.HandleError(fmt.Errorf("Timed out waiting for caches to sync"))
-		return
-	}
+	// Wait till k8s cache is synced
+	for !c.informer.HasSynced(){}
 
 	// Start a number of worker threads to read from the queue.
 	for i := 0; i < threadiness; i++ {
@@ -227,6 +238,12 @@ func (c *NamespaceController) syncToCalico(key string) error {
 		err := c.calicoClient.Profiles().Delete(api.ProfileMetadata{
 			Name: key,
 		})
+
+		// Let Delete() operation be idompotent. Ignore the error while deletion if 
+		// object does not exists on ETCD already.
+		if _, ok := err.(errors.ErrorResourceDoesNotExist); ok {
+			err = nil
+		}
 
 		return err
 	} else {

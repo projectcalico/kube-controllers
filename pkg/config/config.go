@@ -21,6 +21,7 @@ type Config struct {
 	Hostname          string
 	LogLevel          string `default:"info" split_words:"true"`
 	ConfigureEtcHosts string `default:"false" split_words:"true"`
+	ReconcilerPeriod  string `default:"5m" split_words:"true"`
 }
 
 func (c *Config) Parse() error {
@@ -54,16 +55,15 @@ func (c *Config) K8sClusterConfig() (*rest.Config, error) {
 	}, nil
 }
 
-func (c *Config) ConfigEtcHostsIfRequired() {
-	if c.ConfigureEtcHosts == "true" {
-		f, err := os.OpenFile("/etc/hosts", os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			panic(err)
-		}
-		defer f.Close()
-		if _, err = f.WriteString(strings.Join([]string{c.Hostname, "kubernetes.default\n"}, "\t")); err != nil {
-			panic(err)
-		}
-		log.Infof("Appended 'kubernetes.default' -> %s to /etc/hosts", c.Hostname)
+func (c *Config) ConfigEtcHosts() {
+
+	f, err := os.OpenFile("/etc/hosts", os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		panic(err)
 	}
+	defer f.Close()
+	if _, err = f.WriteString(strings.Join([]string{c.Hostname, "kubernetes.default\n"}, "\t")); err != nil {
+		panic(err)
+	}
+	log.Infof("Appended 'kubernetes.default' -> %s to /etc/hosts", c.Hostname)
 }
