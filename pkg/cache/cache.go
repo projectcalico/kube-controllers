@@ -2,7 +2,6 @@ package cache
 
 import (
 	glog "github.com/Sirupsen/logrus"
-	"github.com/kylelemons/godebug/pretty"
 	"github.com/patrickmn/go-cache"
 	calicoClient "github.com/projectcalico/libcalico-go/lib/client"
 	k8sCache "k8s.io/client-go/tools/cache"
@@ -38,7 +37,7 @@ type ResourceCache interface {
 	ListKeys() []string
 
 	// Starts the cache.
-	Run(stopChan chan struct{}, reconcilerPeriod string)
+	Run(reconcilerPeriod string)
 
 	// Get workqueue
 	GetQueue() workqueue.RateLimitingInterface
@@ -49,14 +48,11 @@ type ResourceCache interface {
 type ResourceCacheArgs struct {
 	// ListFunc returns a list of objects.  Responsible for filtering any
 	// objects which should not be monitored by the cache / controller.
-	ListFunc func() ([]interface{}, error)
+	ListFunc func() (map[string]interface{}, error)
 
 	// Takes an object and returns the key string which identifies it in the cache.
 	// e.g. namespace.name
 	KeyFunc func(obj interface{}) string
-
-	// The channel on which modified keys will be sent, if given.
-	OutChan chan string
 
 	// Calico Client
 	Client *calicoClient.Client
@@ -67,15 +63,14 @@ type ResourceCacheArgs struct {
 }
 
 // CalicoCache implements ResourceCache interface
-// Cache only stores pointer to objects instead of actual objects
 type calicoCache struct {
-	threadSafeCache *cache.Cache                    // Underlaying threadsafe implementation of cache
-	workqueue       workqueue.RateLimitingInterface // Workqueue
-	calicoClient    *calicoClient.Client            // Clinet to Calico ETCD datastore
-	k8sCacheIndexer k8sCache.Indexer                // K8S cache indexer used while priming of calicoCache.
-	ListFunc        func() ([]interface{}, error)   // Function that returns a list of objects.
-	KeyFunc         func(obj interface{}) string    // Function that returns key string which identifies it in the cache.
-	ObjectType      reflect.Type                    // Type of object cache will hold
+	threadSafeCache *cache.Cache                           // Underlaying threadsafe implementation of cache
+	workqueue       workqueue.RateLimitingInterface        // Workqueue
+	calicoClient    *calicoClient.Client                   // Clinet to Calico ETCD datastore
+	k8sCacheIndexer k8sCache.Indexer                       // K8S cache indexer used while priming of calicoCache.
+	ListFunc        func() (map[string]interface{}, error) // Function that returns a list of objects.
+	KeyFunc         func(obj interface{}) string           // Function that returns key string which identifies it in the cache.
+	ObjectType      reflect.Type                           // Type of object cache will hold
 }
 
 // NewResourceCache Constructor for ResourceCache.
@@ -95,17 +90,16 @@ func NewResourceCache(args ResourceCacheArgs) ResourceCache {
 
 func (c *calicoCache) Set(key string, newObj interface{}) {
 
-	if reflect.TypeOf(newObj)!=c.ObjectType {
+	if reflect.TypeOf(newObj) != c.ObjectType {
 		glog.Fatalf("Wrong object type recieved to store in cache. Expected: %s, Found: %s", c.ObjectType, reflect.TypeOf(newObj))
 	}
 
 	if existingObj, found := c.threadSafeCache.Get(key); found {
 
 		glog.Debugf("%#v found in cache. comparing..", existingObj)
-		diff := pretty.Compare(existingObj, newObj)
-		glog.Debugf("Diff: %s", diff)
-		
-		if len(diff) != 0 {
+		reflect.DeepEqual(existingObj, newObj)
+
+		if !reflect.DeepEqual(existingObj, newObj) {
 			glog.Debugf("%#v and %#v do not match.Updating it in calico cache.", newObj, existingObj)
 
 			c.threadSafeCache.Set(key, newObj, cache.NoExpiration)
@@ -137,10 +131,10 @@ func (c *calicoCache) Get(key string) (interface{}, bool) {
 
 // Prime funtion adds object to threadSafeCache.
 // Only difference with Set() call is it does not queue the key
-// to workqueue. Stores pointer of value object in  cache
+// to workqueue.
 func (c *calicoCache) Prime(key string, value interface{}) {
 
-	c.threadSafeCache.Set(key, &value, cache.NoExpiration)
+	c.threadSafeCache.Set(key, value, cache.NoExpiration)
 }
 
 // ListKeys returns list of calico cache keys in the form
@@ -161,14 +155,14 @@ func (c *calicoCache) GetQueue() workqueue.RateLimitingInterface {
 }
 
 // Load all the calico datastore objects at the begining of run
-func (c *calicoCache) Run(stopChan chan struct{}, reconcilerPeriod string) {
+func (c *calicoCache) Run(reconcilerPeriod string) {
 
 	// Retry priming of cache if connection to ETCD datastore fails
 	for err := c.primeCache(); err != nil; {
-  		glog.WithError(err).Errorf("Failed to prime Calico cache, retrying")
+		glog.WithError(err).Errorf("Failed to prime Calico cache, retrying")
 	}
 
-	go c.reconcile(stopChan, reconcilerPeriod)
+	go c.reconcile(reconcilerPeriod)
 }
 
 // primeCache() function populates Calico Cache with only calico objects
@@ -186,89 +180,78 @@ func (c *calicoCache) primeCache() error {
 		calicoKey := c.KeyFunc(profile)
 		c.Prime(calicoKey, profile)
 	}
-
 	return nil
 }
 
 // reconcile() function runs every `reconcilerPeriod` and brings ETCD datastore
-// in sync with Calico cache. This is to correct any manual changes done by 
+// in sync with Calico cache. This is to correct any manual changes done by
 // user in Calico ETCD.
-func (c *calicoCache) reconcile(stopChan chan struct{}, reconcilerPeriod string) {
+func (c *calicoCache) reconcile(reconcilerPeriod string) {
 
 	duration, err := time.ParseDuration(reconcilerPeriod)
-	if (err!=nil){
-		glog.Fatalf("Invalid time duration format %s for reconciler. Some correct examples, 5m, 30s, 2m30s etc. Reconciler will not sync any objects.",reconcilerPeriod)
+	if err != nil {
+		glog.Fatalf("Invalid time duration format %s for reconciler. Some correct examples, 5m, 30s, 2m30s etc.", reconcilerPeriod)
 		return
 	}
 
 	// If user has set duration to 0 then disable the reconciler job.
-	if(duration.Nanoseconds() == 0){
+	if duration.Nanoseconds() == 0 {
 		glog.Infof("Reconciler period set to %d. Disabling reconciler.", duration.Nanoseconds())
 		return
 	}
 
-	ticker := time.NewTicker(duration)
-	go func() {
-		for t := range ticker.C {
-			glog.Info("Performing a periodic resync at ", t)
-			c.performDatastoreSync()
-			glog.Info("Periodic resync done")
-		}
-	}()
-
-	<-stopChan
-	ticker.Stop()
+	for {
+		time.Sleep(duration)
+		glog.Info("Performing a periodic resync")
+		c.performDatastoreSync()
+		glog.Info("Periodic resync done")
+	}
 }
 
 func (c *calicoCache) performDatastoreSync() {
 
 	// Get all objects created by policy controller from ETCD datastore.
-	etcdObjList, err := c.ListFunc()
+	etcdObjMap, err := c.ListFunc()
 	if err != nil {
 		glog.Error(err)
 		return
 	}
 
-	// Build a map of existing objects on ETCD datastore, plus a map including all keys that exist.
+	// Build a map of existing objects on ETCD datastore.
 	allKeys := map[string]bool{}
-	etcd := map[string]interface{}{}
-	for _, etcdObj := range etcdObjList {
 
-		k := c.KeyFunc(etcdObj)
-		// Storing list of ETDC objects in map of [string]interface{} for easy lookup
-		etcd[k] = etcdObj
-		allKeys[k] = true
+	for key := range etcdObjMap {
+		allKeys[key] = true
 	}
 
-	// Now, send through all existing keys across both the Kubernetes API, and
-	// etcd so we can sync them if needed.
-	for _, k := range c.ListKeys() {
-		allKeys[k] = true
+	// Also add all existing keys from calico cache
+	for _, key := range c.ListKeys() {
+		allKeys[key] = true
 	}
 
 	glog.Debugf("Reconcilor working on %d keys in total", len(allKeys))
 
-	for k := range allKeys {
+	for key := range allKeys {
 
-		cachedObj, exists := c.Get(k)
+		cachedObj, exists := c.Get(key)
 		if !exists {
-			// Does not exists on kubernetes. Delete on ETCD as well.
-			c.workqueue.Add(k)
+			// Does not exists in calico cache. Delete on ETCD as well.
+			c.workqueue.Add(key)
 			continue
 		}
 
-		if _, exists := etcd[k]; !exists {
-			// Has got deleted on ETCD datastore. recreate it.
-			c.workqueue.Add(k)
+		if _, exists := etcdObjMap[key]; !exists {
+			// Exists in calico cache but has got deleted on ETCD datastore.
+			// Recreate it.
+			c.workqueue.Add(key)
 			continue
 		}
 
-		diff := pretty.Compare(etcd[k], cachedObj)
-		glog.Debugf("Diff: %s", diff)
+		etcdObj := etcdObjMap[key]
 
-		if len(diff) != 0 {
-			// ETCD copy of object is deviated from Calico cache.
-			c.workqueue.Add(k)
+		if !reflect.DeepEqual(etcdObj, cachedObj) {
+			// ETCD copy of object is deviated from Calico cache
+			c.workqueue.Add(key)
 			continue
 		}
 	}

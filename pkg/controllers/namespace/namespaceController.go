@@ -1,7 +1,6 @@
 package namespace
 
 import (
-	"reflect"
 	glog "github.com/Sirupsen/logrus"
 	calicocache "github.com/projectcalico/k8s-policy/pkg/cache"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/controller"
@@ -14,8 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/pkg/api/v1"
-	rest "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -28,37 +27,21 @@ type NamespaceController struct {
 	informer       cache.Controller
 	calicoObjCache calicocache.ResourceCache
 	calicoClient   *client.Client
+	k8sClientset   *kubernetes.Clientset
 }
 
 // NewNamespaceController Constructor for NamespaceController
-func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
+func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *client.Client) controller.Controller {
 
-	// Get kubenetes clientset
-	clientset, err := kubernetes.NewForConfig(k8sConfig)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	cconfig, err := client.LoadClientConfig("")
-	if err != nil {
-		panic(err)
-	}
-
-	// Get Calico client
-	cclient, err := client.New(*cconfig)
-	if err != nil {
-		panic(err)
-	}
-
-	// Function returns slice of profile objects stored by policy controller
-	// on ETCD datastore.Indentifies controller writen objects by
+	// Function returns map of profile_name:object stored by policy controller
+	// on ETCD datastore. Indentifies controller writen objects by
 	// their naming convention.
-	listFunc := func() ([]interface{}, error) {
+	listFunc := func() (map[string]interface{}, error) {
 
-		var filteredProfiles []interface{}
+		filteredProfiles := make(map[string]interface{})
 
 		// Get all profile objects from ETCD datastore
-		calicoProfiles, err := cclient.Profiles().List(api.ProfileMetadata{})
+		calicoProfiles, err := calicoClient.Profiles().List(api.ProfileMetadata{})
 		if err != nil {
 			return filteredProfiles, err
 		}
@@ -68,7 +51,7 @@ func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 
 			profileName := profile.Metadata.Name
 			if strings.HasPrefix(profileName, converter.ProfileNameFormat) {
-				filteredProfiles = append(filteredProfiles, profile)
+				filteredProfiles[profileName] = profile
 			}
 		}
 		glog.Debugf("Found %d profiles in calico ETCD:", len(filteredProfiles))
@@ -78,28 +61,28 @@ func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 	// Function returns key of the object in kubernetes format.
 	keyFunc := func(obj interface{}) string {
 		profile := obj.(api.Profile)
-		Key := profile.Metadata.Name
-		return Key
+		key := profile.Metadata.Name
+		return key
 	}
 
 	cacheArgs := calicocache.ResourceCacheArgs{
 		ListFunc:   listFunc,
 		KeyFunc:    keyFunc,
-		Client:     cclient,
-		ObjectType: reflect.TypeOf(&api.Profile{}), // Restrict cache to store pointers to calico profile objects only.
+		Client:     calicoClient,
+		ObjectType: reflect.TypeOf(api.Profile{}), // Restrict cache to store calico profiles only.
 	}
-	
+
 	ccache := calicocache.NewResourceCache(cacheArgs)
 	namespaceConverter := converter.NewNamespaceConverter()
 
 	// create the watcher
-	listWatcher := cache.NewListWatchFromClient(clientset.Core().RESTClient(), "namespaces", "", fields.Everything())
+	listWatcher := cache.NewListWatchFromClient(k8sClientset.Core().RESTClient(), "namespaces", "", fields.Everything())
 
 	// Bind the calico cache to kubernetes cache with the help of an informer. This way we make sure that
 	// whenever the kubernetes cache is updated, changes get reflected in calico cache as well.
 	indexer, informer := cache.NewIndexerInformer(listWatcher, &v1.Namespace{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			
+
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			glog.Infof("Got ADD event for namespace: %s\n", key)
 
@@ -114,7 +97,7 @@ func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 				return
 			}
 			// Add profileName:*profile in calicoCache
-			ccache.Set(profile.(*api.Profile).Metadata.Name, profile)		
+			ccache.Set(profile.(api.Profile).Metadata.Name, profile)
 		},
 		UpdateFunc: func(oldObj interface{}, newObj interface{}) {
 
@@ -143,12 +126,11 @@ func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 				return
 			}
 			// Add profileName:profile in calicoCache
-			ccache.Set(profile.(*api.Profile).Metadata.Name, profile)			
+			ccache.Set(profile.(api.Profile).Metadata.Name, profile)
 		},
 		DeleteFunc: func(obj interface{}) {
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
 			// key function.
-
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 			glog.Infof("Got DELETE event for namespace: %s\n", key)
 
@@ -162,11 +144,11 @@ func NewNamespaceController(k8sConfig *rest.Config) controller.Controller {
 				glog.Errorf("Error while converting %#v to calico profile.", obj)
 				return
 			}
-			ccache.Delete(profile.(*api.Profile).Metadata.Name)		
+			ccache.Delete(profile.(api.Profile).Metadata.Name)
 		},
 	}, cache.Indexers{})
 
-	return &NamespaceController{indexer, informer, ccache, cclient}
+	return &NamespaceController{indexer, informer, ccache, calicoClient, k8sClientset}
 }
 
 // Run starts controller.Internally it starts syncing
@@ -182,12 +164,13 @@ func (c *NamespaceController) Run(threadiness int, reconcilerPeriod string, stop
 
 	// Start Calico cache. Cache gets loaded with objects
 	// from ETCD datastore.
-	c.calicoObjCache.Run(stopCh, reconcilerPeriod)
+	c.calicoObjCache.Run(reconcilerPeriod)
 
 	go c.informer.Run(stopCh)
 
 	// Wait till k8s cache is synced
-	for !c.informer.HasSynced(){}
+	for !c.informer.HasSynced() {
+	}
 
 	// Start a number of worker threads to read from the queue.
 	for i := 0; i < threadiness; i++ {
@@ -239,7 +222,7 @@ func (c *NamespaceController) syncToCalico(key string) error {
 			Name: key,
 		})
 
-		// Let Delete() operation be idompotent. Ignore the error while deletion if 
+		// Let Delete() operation be idompotent. Ignore the error while deletion if
 		// object does not exists on ETCD already.
 		if _, ok := err.(errors.ErrorResourceDoesNotExist); ok {
 			err = nil
@@ -248,10 +231,10 @@ func (c *NamespaceController) syncToCalico(key string) error {
 		return err
 	} else {
 
-		var p *api.Profile
-		p = obj.(*api.Profile)
+		var p api.Profile
+		p = obj.(api.Profile)
 		glog.Infof("Applying namespace %s on ETCD \n", key)
-		_, err := c.calicoClient.Profiles().Apply(p)
+		_, err := c.calicoClient.Profiles().Apply(&p)
 
 		return err
 	}
