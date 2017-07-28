@@ -2,7 +2,7 @@ package converter
 
 import (
 	"fmt"
-	glog "github.com/Sirupsen/logrus"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	k8sApiV1 "k8s.io/client-go/pkg/api/v1"
 	"reflect"
@@ -24,7 +24,7 @@ func NewNamespaceConverter() Converter {
 func (p *namespaceConverter) Convert(k8sObj interface{}) (interface{}, error) {
 
 	if reflect.TypeOf(k8sObj).String() != "*v1.Namespace" {
-		glog.Fatalf("can not convert object %#v to calico profile. Object is not of type *v1.Namespace", k8sObj)
+		log.Fatalf("can not convert object %#v to calico profile. Object is not of type *v1.Namespace", k8sObj)
 	}
 
 	namespace := k8sObj.(*k8sApiV1.Namespace)

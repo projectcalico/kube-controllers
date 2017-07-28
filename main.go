@@ -1,41 +1,43 @@
 package main
 
 import (
+	"flag"
 	"os"
-	glog "github.com/Sirupsen/logrus"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/namespace"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 	"github.com/projectcalico/libcalico-go/lib/client"
+	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/tools/clientcmd"	
 )
 
 func main() {
 
-	logLevel, err := glog.ParseLevel(os.Getenv("LOG_LEVEL"))
-	if(err!=nil){
+	logLevel, err := log.ParseLevel(os.Getenv("LOG_LEVEL"))
+	if err != nil {
 		// Defaulting log level to INFO
-		logLevel = glog.InfoLevel
+		logLevel = log.InfoLevel
 	}
 
-	glog.SetLevel(logLevel)
+	log.SetLevel(logLevel)
 
 	k8sClientset, calicoClient, err := getClients()
 
 	if err != nil {
-		glog.Fatal(err)
+		log.Fatal(err)
 	}
+
 	controller := namespace.NewNamespaceController(k8sClientset, calicoClient)
 
 	stop := make(chan struct{})
 	defer close(stop)
 
 	reconcilerPeriod, exists := os.LookupEnv("RECONCILER_PERIOD")
-	if(!exists){
+	if !exists {
 		// Defaulting to 5 mins
 		reconcilerPeriod = "5m"
-	} 
-	
+	}
+
 	go controller.Run(5, reconcilerPeriod, stop)
 
 	// Wait forever.
@@ -43,9 +45,6 @@ func main() {
 }
 
 // Fuction that returns kubernetes and calico clients.
-// Function collects connection infromation from environment variables
-// as well as kubeconfig file. Environment variables override configs
-// provided in kubeconfig file.
 func getClients() (*kubernetes.Clientset, *client.Client, error) {
 
 	cconfig, err := client.LoadClientConfig("")
@@ -59,49 +58,24 @@ func getClients() (*kubernetes.Clientset, *client.Client, error) {
 		panic(err)
 	}
 
-	k8sConfig := cconfig.Spec.KubeConfig
+	var kubeconfig string
+	var master string
 
-	glog.Debugf("Building client for config: %+v", k8sConfig)
-	configOverrides := &clientcmd.ConfigOverrides{}
-	var overridesMap = []struct {
-		variable *string
-		value    string
-	}{
-		{&configOverrides.ClusterInfo.Server, k8sConfig.K8sAPIEndpoint},
-		{&configOverrides.AuthInfo.ClientCertificate, k8sConfig.K8sCertFile},
-		{&configOverrides.AuthInfo.ClientKey, k8sConfig.K8sKeyFile},
-		{&configOverrides.ClusterInfo.CertificateAuthority, k8sConfig.K8sCAFile},
-		{&configOverrides.AuthInfo.Token, k8sConfig.K8sAPIToken},
+	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
+	flag.StringVar(&master, "master", "", "master url")
+	flag.Parse()
+
+	// creates the connection
+	k8sconfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
+	if err != nil {
+		log.Fatal(err)
 	}
-
-	// Set an explicit path to the kubeconfig if one
-	// was provided.
-	loadingRules := clientcmd.ClientConfigLoadingRules{}
-	if k8sConfig.Kubeconfig != "" {
-		loadingRules.ExplicitPath = k8sConfig.Kubeconfig
-	}
-
-	// Using the override map above, populate any non-empty values.
-	for _, override := range overridesMap {
-		if override.value != "" {
-			*override.variable = override.value
-		}
-	}
-	if k8sConfig.K8sInsecureSkipTLSVerify {
-		configOverrides.ClusterInfo.InsecureSkipTLSVerify = true
-	}
-	glog.Debugf("Config overrides: %+v", configOverrides)
-
-	// A kubeconfig file was provided.  Use it to load a config, passing through
-	// any overrides.
-	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(&loadingRules, configOverrides).ClientConfig()
-
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// Get kubenetes clientset
-	k8sClientset, err := kubernetes.NewForConfig(config)
+	k8sClientset, err := kubernetes.NewForConfig(k8sconfig)
 	if err != nil {
 		panic(err.Error())
 	}

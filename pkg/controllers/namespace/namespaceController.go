@@ -1,7 +1,7 @@
 package namespace
 
 import (
-	glog "github.com/Sirupsen/logrus"
+	log "github.com/Sirupsen/logrus"
 	calicocache "github.com/projectcalico/k8s-policy/pkg/cache"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/controller"
 	"github.com/projectcalico/k8s-policy/pkg/converter"
@@ -54,7 +54,7 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				filteredProfiles[profileName] = profile
 			}
 		}
-		glog.Debugf("Found %d profiles in calico ETCD:", len(filteredProfiles))
+		log.Debugf("Found %d profiles in calico ETCD:", len(filteredProfiles))
 		return filteredProfiles, nil
 	}
 
@@ -84,16 +84,16 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 		AddFunc: func(obj interface{}) {
 
 			key, err := cache.MetaNamespaceKeyFunc(obj)
-			glog.Infof("Got ADD event for namespace: %s\n", key)
+			log.Infof("Got ADD event for namespace: %s\n", key)
 
 			if err != nil {
-				glog.Error(err)
+				log.Error(err)
 				return
 			}
 
 			profile, conversionErr := namespaceConverter.Convert(obj)
 			if conversionErr != nil {
-				glog.Errorf("Error while converting %#v to calico profile.", obj)
+				log.Errorf("Error while converting %#v to calico profile.", obj)
 				return
 			}
 			// Add profileName:*profile in calicoCache
@@ -103,12 +103,12 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 
 			key, err := cache.MetaNamespaceKeyFunc(newObj)
 
-			glog.Infof("Got UPDATE event for namespace: %s\n", key)
-			glog.Debugf("Old object: %#v\n", oldObj)
-			glog.Debugf("New object: %#v\n", newObj)
+			log.Infof("Got UPDATE event for namespace: %s\n", key)
+			log.Debugf("Old object: %#v\n", oldObj)
+			log.Debugf("New object: %#v\n", newObj)
 
 			if err != nil {
-				glog.Error(err)
+				log.Error(err)
 				return
 			}
 
@@ -117,12 +117,12 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				// is getting deleted. Ignore this event. When deletion
 				// completes another DELETE event will be raised.
 				// Let DeleteFunc handle that.
-				glog.Debugf("Namespace %s is getting deleted.", newObj.(*v1.Namespace).ObjectMeta.GetName())
+				log.Debugf("Namespace %s is getting deleted.", newObj.(*v1.Namespace).ObjectMeta.GetName())
 				return
 			}
 			profile, conversionErr := namespaceConverter.Convert(newObj)
 			if conversionErr != nil {
-				glog.Errorf("Error while converting %#v to calico profile.", newObj)
+				log.Errorf("Error while converting %#v to calico profile.", newObj)
 				return
 			}
 			// Add profileName:profile in calicoCache
@@ -132,16 +132,16 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
 			// key function.
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-			glog.Infof("Got DELETE event for namespace: %s\n", key)
+			log.Infof("Got DELETE event for namespace: %s\n", key)
 
 			if err != nil {
-				glog.Error(err)
+				log.Error(err)
 				return
 			}
 
 			profile, conversionErr := namespaceConverter.Convert(obj)
 			if conversionErr != nil {
-				glog.Errorf("Error while converting %#v to calico profile.", obj)
+				log.Errorf("Error while converting %#v to calico profile.", obj)
 				return
 			}
 			ccache.Delete(profile.(api.Profile).Metadata.Name)
@@ -160,7 +160,7 @@ func (c *NamespaceController) Run(threadiness int, reconcilerPeriod string, stop
 	workqueue := c.calicoObjCache.GetQueue()
 	defer workqueue.ShutDown()
 
-	glog.Info("Starting namespace controller")
+	log.Info("Starting namespace controller")
 
 	// Start Calico cache. Cache gets loaded with objects
 	// from ETCD datastore.
@@ -178,7 +178,7 @@ func (c *NamespaceController) Run(threadiness int, reconcilerPeriod string, stop
 	}
 
 	<-stopCh
-	glog.Info("Stopping Node controller")
+	log.Info("Stopping Node controller")
 }
 
 func (c *NamespaceController) runWorker() {
@@ -215,8 +215,8 @@ func (c *NamespaceController) syncToCalico(key string) error {
 
 	if !exists {
 
-		glog.Debugf("namespace %s does not exist anymore on kubernetes\n", key)
-		glog.Infof("Deleting namespace %s on ETCD \n", key)
+		log.Debugf("namespace %s does not exist anymore on kubernetes\n", key)
+		log.Infof("Deleting namespace %s on ETCD \n", key)
 
 		err := c.calicoClient.Profiles().Delete(api.ProfileMetadata{
 			Name: key,
@@ -233,7 +233,7 @@ func (c *NamespaceController) syncToCalico(key string) error {
 
 		var p api.Profile
 		p = obj.(api.Profile)
-		glog.Infof("Applying namespace %s on ETCD \n", key)
+		log.Infof("Applying namespace %s on ETCD \n", key)
 		_, err := c.calicoClient.Profiles().Apply(&p)
 
 		return err
@@ -253,7 +253,7 @@ func (c *NamespaceController) handleErr(err error, key string) {
 
 	// This controller retries 5 times if something goes wrong. After that, it stops trying.
 	if workqueue.NumRequeues(key) < 5 {
-		glog.Errorf("Error syncing namespace %v: %v", key, err)
+		log.Errorf("Error syncing namespace %v: %v", key, err)
 
 		// Re-enqueue the key rate limited. Based on the rate limiter on the
 		// queue and the re-enqueue history, the key will be processed later again.
@@ -264,5 +264,5 @@ func (c *NamespaceController) handleErr(err error, key string) {
 	workqueue.Forget(key)
 	// Report to an external entity that, even after several retries, we could not successfully process this key
 	uruntime.HandleError(err)
-	glog.Errorf("Dropping namespace %q out of the queue: %v", key, err)
+	log.Errorf("Dropping namespace %q out of the queue: %v", key, err)
 }

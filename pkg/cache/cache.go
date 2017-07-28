@@ -1,7 +1,7 @@
 package cache
 
 import (
-	glog "github.com/Sirupsen/logrus"
+	log "github.com/Sirupsen/logrus"
 	"github.com/patrickmn/go-cache"
 	calicoClient "github.com/projectcalico/libcalico-go/lib/client"
 	k8sCache "k8s.io/client-go/tools/cache"
@@ -91,22 +91,21 @@ func NewResourceCache(args ResourceCacheArgs) ResourceCache {
 func (c *calicoCache) Set(key string, newObj interface{}) {
 
 	if reflect.TypeOf(newObj) != c.ObjectType {
-		glog.Fatalf("Wrong object type recieved to store in cache. Expected: %s, Found: %s", c.ObjectType, reflect.TypeOf(newObj))
+		log.Fatalf("Wrong object type recieved to store in cache. Expected: %s, Found: %s", c.ObjectType, reflect.TypeOf(newObj))
 	}
 
 	if existingObj, found := c.threadSafeCache.Get(key); found {
 
-		glog.Debugf("%#v found in cache. comparing..", existingObj)
-		reflect.DeepEqual(existingObj, newObj)
+		log.Debugf("%#v found in cache. comparing..", existingObj)
 
 		if !reflect.DeepEqual(existingObj, newObj) {
-			glog.Debugf("%#v and %#v do not match.Updating it in calico cache.", newObj, existingObj)
+			log.Debugf("%#v and %#v do not match.Updating it in calico cache.", newObj, existingObj)
 
 			c.threadSafeCache.Set(key, newObj, cache.NoExpiration)
 			c.workqueue.Add(key)
 		}
 	} else {
-		glog.Debugf("%#v not found in calico cache. Adding it in calico cache", newObj)
+		log.Debugf("%#v not found in calico cache. Adding it in calico cache", newObj)
 
 		c.threadSafeCache.Set(key, newObj, cache.NoExpiration)
 		c.workqueue.Add(key)
@@ -115,7 +114,7 @@ func (c *calicoCache) Set(key string, newObj interface{}) {
 
 func (c *calicoCache) Delete(key string) {
 
-	glog.Debug("Deleting %s in calico", key)
+	log.Debug("Deleting %s in calico", key)
 	c.threadSafeCache.Delete(key)
 	c.workqueue.Add(key)
 }
@@ -159,7 +158,7 @@ func (c *calicoCache) Run(reconcilerPeriod string) {
 
 	// Retry priming of cache if connection to ETCD datastore fails
 	for err := c.primeCache(); err != nil; {
-		glog.WithError(err).Errorf("Failed to prime Calico cache, retrying")
+		log.WithError(err).Errorf("Failed to prime Calico cache, retrying")
 	}
 
 	go c.reconcile(reconcilerPeriod)
@@ -172,7 +171,7 @@ func (c *calicoCache) primeCache() error {
 	etcdObjList, err := c.ListFunc()
 
 	if err != nil {
-		glog.Error(err)
+		log.Error(err)
 		return err
 	}
 
@@ -190,21 +189,21 @@ func (c *calicoCache) reconcile(reconcilerPeriod string) {
 
 	duration, err := time.ParseDuration(reconcilerPeriod)
 	if err != nil {
-		glog.Fatalf("Invalid time duration format %s for reconciler. Some correct examples, 5m, 30s, 2m30s etc.", reconcilerPeriod)
+		log.Fatalf("Invalid time duration format %s for reconciler. Some correct examples, 5m, 30s, 2m30s etc.", reconcilerPeriod)
 		return
 	}
 
 	// If user has set duration to 0 then disable the reconciler job.
 	if duration.Nanoseconds() == 0 {
-		glog.Infof("Reconciler period set to %d. Disabling reconciler.", duration.Nanoseconds())
+		log.Infof("Reconciler period set to %d. Disabling reconciler.", duration.Nanoseconds())
 		return
 	}
 
 	for {
 		time.Sleep(duration)
-		glog.Info("Performing a periodic resync")
+		log.Info("Performing a periodic resync")
 		c.performDatastoreSync()
-		glog.Info("Periodic resync done")
+		log.Info("Periodic resync done")
 	}
 }
 
@@ -213,7 +212,7 @@ func (c *calicoCache) performDatastoreSync() {
 	// Get all objects created by policy controller from ETCD datastore.
 	etcdObjMap, err := c.ListFunc()
 	if err != nil {
-		glog.Error(err)
+		log.Error(err)
 		return
 	}
 
@@ -229,7 +228,7 @@ func (c *calicoCache) performDatastoreSync() {
 		allKeys[key] = true
 	}
 
-	glog.Debugf("Reconcilor working on %d keys in total", len(allKeys))
+	log.Debugf("Reconcilor working on %d keys in total", len(allKeys))
 
 	for key := range allKeys {
 
