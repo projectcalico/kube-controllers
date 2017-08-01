@@ -10,13 +10,11 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/errors"
 	"k8s.io/apimachinery/pkg/fields"
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
 	"strings"
-	"time"
 )
 
 // NamespaceController Implements Controller interface
@@ -174,7 +172,7 @@ func (c *NamespaceController) Run(threadiness int, reconcilerPeriod string, stop
 
 	// Start a number of worker threads to read from the queue.
 	for i := 0; i < threadiness; i++ {
-		go wait.Until(c.runWorker, time.Second, stopCh)
+		go c.runWorker()
 	}
 
 	<-stopCh

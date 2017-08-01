@@ -4,7 +4,6 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/patrickmn/go-cache"
 	calicoClient "github.com/projectcalico/libcalico-go/lib/client"
-	k8sCache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"reflect"
 	"time"
@@ -32,6 +31,10 @@ type ResourceCache interface {
 	// Deletes the value identified by the given key from the cache, and
 	// generates an update on the queue if a value was deleted.
 	Delete(key string)
+
+	// Cleans up the object identified by the given key from the cache.
+	// It does not update the queue.
+	Clean(key string)
 
 	// Lists the keys currently in the cache.
 	ListKeys() []string
@@ -67,7 +70,6 @@ type calicoCache struct {
 	threadSafeCache *cache.Cache                           // Underlaying threadsafe implementation of cache
 	workqueue       workqueue.RateLimitingInterface        // Workqueue
 	calicoClient    *calicoClient.Client                   // Clinet to Calico ETCD datastore
-	k8sCacheIndexer k8sCache.Indexer                       // K8S cache indexer used while priming of calicoCache.
 	ListFunc        func() (map[string]interface{}, error) // Function that returns a list of objects.
 	KeyFunc         func(obj interface{}) string           // Function that returns key string which identifies it in the cache.
 	ObjectType      reflect.Type                           // Type of object cache will hold
@@ -114,9 +116,15 @@ func (c *calicoCache) Set(key string, newObj interface{}) {
 
 func (c *calicoCache) Delete(key string) {
 
-	log.Debug("Deleting %s in calico", key)
+	log.Debugf("Deleting %s in calico", key)
 	c.threadSafeCache.Delete(key)
 	c.workqueue.Add(key)
+}
+
+func (c *calicoCache) Clean(key string) {
+
+	log.Debugf("Cleaning up %s in calico cache.", key)
+	c.threadSafeCache.Delete(key)
 }
 
 func (c *calicoCache) Get(key string) (interface{}, bool) {
@@ -175,9 +183,8 @@ func (c *calicoCache) primeCache() error {
 		return err
 	}
 
-	for _, profile := range etcdObjList {
-		calicoKey := c.KeyFunc(profile)
-		c.Prime(calicoKey, profile)
+	for name, etcdObj := range etcdObjList {
+		c.Prime(name, etcdObj)
 	}
 	return nil
 }
