@@ -53,10 +53,6 @@ type ResourceCacheArgs struct {
 	// objects which should not be monitored by the cache / controller.
 	ListFunc func() (map[string]interface{}, error)
 
-	// Takes an object and returns the key string which identifies it in the cache.
-	// e.g. namespace.name
-	KeyFunc func(obj interface{}) string
-
 	// Calico Client
 	Client *calicoClient.Client
 
@@ -71,7 +67,6 @@ type calicoCache struct {
 	workqueue       workqueue.RateLimitingInterface        // Workqueue
 	calicoClient    *calicoClient.Client                   // Clinet to Calico ETCD datastore
 	ListFunc        func() (map[string]interface{}, error) // Function that returns a list of objects.
-	KeyFunc         func(obj interface{}) string           // Function that returns key string which identifies it in the cache.
 	ObjectType      reflect.Type                           // Type of object cache will hold
 }
 
@@ -85,7 +80,6 @@ func NewResourceCache(args ResourceCacheArgs) ResourceCache {
 		workqueue:       workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
 		calicoClient:    args.Client,
 		ListFunc:        args.ListFunc,
-		KeyFunc:         args.KeyFunc,
 		ObjectType:      args.ObjectType,
 	}
 }

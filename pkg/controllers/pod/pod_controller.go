@@ -7,6 +7,7 @@ import (
 	"github.com/projectcalico/k8s-policy/pkg/converter"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/client"
+	"github.com/projectcalico/libcalico-go/lib/errors"
 	"k8s.io/apimachinery/pkg/fields"
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -30,6 +31,8 @@ type PodController struct {
 // NewPodController Constructor for PodController
 func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.Client) controller.Controller {
 
+	podConverter := converter.NewPodConverter()
+
 	// Function returns map of podName:podObject stored by policy controller
 	// on ETCD datastore. Indentifies controller writen objects by
 	// their naming convention.
@@ -49,24 +52,16 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 		// Filter out only objects that are written by policy controller
 		for _, endpoint := range workloadEndpoints.Items {
 
-			workloadID := endpoint.Metadata.Workload
-			filteredPods[workloadID] = endpoint.Metadata.Labels
+			key := podConverter.GetKey(endpoint)
+			filteredPods[key] = endpoint.Metadata.Labels
 		}
 		log.Debugf("Found %d pods in calico ETCD:", len(filteredPods))
 		return filteredPods, nil
 	}
 
-	// Function returns key of the object in kubernetes format.
-	keyFunc := func(obj interface{}) string {
-		endpoint := obj.(api.WorkloadEndpoint)
-		// workloadID is the key accross all the caches
-		key := endpoint.Metadata.Workload
-		return key
-	}
 
 	cacheArgs := calicocache.ResourceCacheArgs{
 		ListFunc:   listFunc,
-		KeyFunc:    keyFunc,
 		Client:     calicoClient,
 		ObjectType: reflect.TypeOf(map[string]string{}), // Restrict cache to store pod labels only.
 	}
@@ -74,7 +69,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 	labelCache := calicocache.NewResourceCache(cacheArgs)
 	endpointCache := make(map[string]api.WorkloadEndpoint)
 
-	podConverter := converter.NewPodConverter()
+	
 
 	// create the watcher
 	listWatcher := cache.NewListWatchFromClient(k8sClientset.Core().RESTClient(), "pods", "", fields.Everything())
@@ -99,8 +94,9 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 			}
 
 			workloadEndpoint := endpoint.(api.WorkloadEndpoint)
+			calicoKey := podConverter.GetKey(workloadEndpoint)
 			// Add workloadID:Labels in labelCache
-			labelCache.Prime(workloadEndpoint.Metadata.Workload, workloadEndpoint.Metadata.Labels)
+			labelCache.Prime(calicoKey, workloadEndpoint.Metadata.Labels)
 		},
 		UpdateFunc: func(oldObj interface{}, newObj interface{}) {
 
@@ -115,14 +111,6 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 			log.Debugf("Old object: %#v\n", oldObj)
 			log.Debugf("New object: %#v\n", newObj)
 
-			if newObj.(*v1.Pod).Status.Phase == "Terminating" {
-				// If object status is updated to "Terminating", object
-				// is getting deleted. Ignore this event. When deletion
-				// completes another DELETE event will be raised.
-				// Let DeleteFunc handle that.
-				log.Debugf("Pod %s is getting deleted.", newObj.(*v1.Pod).ObjectMeta.GetName())
-				return
-			}
 			endpoint, conversionErr := podConverter.Convert(newObj)
 			if conversionErr != nil {
 				log.Errorf("Error while converting %#v to endpoint.", newObj)
@@ -130,8 +118,9 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 			}
 
 			workloadEndpoint := endpoint.(api.WorkloadEndpoint)
+			calicoKey := podConverter.GetKey(workloadEndpoint)
 			// Add workloadID:Labels in labelCache
-			labelCache.Set(workloadEndpoint.Metadata.Workload, workloadEndpoint.Metadata.Labels)
+			labelCache.Set(calicoKey, workloadEndpoint.Metadata.Labels)
 		},
 		DeleteFunc: func(obj interface{}) {
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
@@ -151,8 +140,9 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 			}
 
 			workloadEndpoint := endpoint.(api.WorkloadEndpoint)
-			labelCache.Clean(workloadEndpoint.Metadata.Workload)
-			delete(endpointCache, workloadEndpoint.Metadata.Workload)
+			calicoKey := podConverter.GetKey(workloadEndpoint)
+			labelCache.Clean(calicoKey)
+			delete(endpointCache, calicoKey)
 		},
 	}, cache.Indexers{})
 
@@ -255,14 +245,20 @@ func (c *PodController) syncToCalico(key string) error {
 			// Update the labels on endpoint
 			endpoint.Metadata.Labels = newLabels
 
-			log.Infof("Applying endpoint %s on ETCD \n", key)
-			_, applyErr := c.calicoClient.WorkloadEndpoints().Apply(&endpoint)
+			log.Infof("Updating endpoint %s with labels %#v on ETCD \n", key, newLabels)
+			_, err := c.calicoClient.WorkloadEndpoints().Update(&endpoint)
 
-			if applyErr == nil {
-				// Update endpoint cache with modified endpoint.
+			if err == nil {
+				// Update endpoint cache as well with modified endpoint.
 				c.endpointCache[key] = endpoint
 			}
-			return applyErr
+			
+			if _, ok := err.(errors.ErrorResourceDoesNotExist); ok {
+				// Endpoint not yet created by CNI plugin. 
+				err = nil
+			}
+
+			return err
 		}
 	}
 
