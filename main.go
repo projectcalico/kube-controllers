@@ -1,16 +1,15 @@
 package main
 
 import (
-	"os"
 	"flag"
-	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/namespace"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/pod"
-	"github.com/projectcalico/k8s-policy/pkg/controllers/networkPolicy"
 	"github.com/projectcalico/libcalico-go/lib/client"
+	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/tools/clientcmd"
+	"os"
 )
 
 func main() {
