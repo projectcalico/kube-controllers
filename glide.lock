@@ -1,5 +1,5 @@
-hash: 912b89f72105092e6560e5afd0e4e518f2c5c589fa70bc0fb6dbd9de234fcf38
-updated: 2017-08-08T10:28:46.532068966-07:00
+hash: 4fd36a06bf5070de491bbf32475537b63568c30dfb0486fbf648770f92adb3ae
+updated: 2017-08-08T12:38:22.426776962-07:00
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -7,11 +7,10 @@ imports:
   - compute/metadata
   - internal
 - name: github.com/coreos/etcd
-  version: 2c958939bb4c4b0531240d1d89beeaeb18cf30af
+  version: 17ae440991da3bdb2df4309936dd2074f66ec394
   subpackages:
   - client
   - pkg/pathutil
-  - pkg/srv
   - pkg/tlsutil
   - pkg/transport
   - pkg/types
@@ -25,7 +24,7 @@ imports:
   - oauth2
   - oidc
 - name: github.com/coreos/go-semver
-  version: 8ab6407b697782a06568d4b7f1db25550ec2e4c6
+  version: 568e959cd89871e61434c1143528d9162da89ef2
   subpackages:
   - semver
 - name: github.com/coreos/pkg
