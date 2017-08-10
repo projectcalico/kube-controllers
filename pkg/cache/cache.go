@@ -157,7 +157,7 @@ func (c *calicoCache) primeCache() error {
 	etcdObjList, err := c.ListFunc()
 
 	if err != nil {
-		log.Error(err)
+		log.WithError(err).Errorf("unable to list objects from ETCD while priming cache.")
 		return err
 	}
 
@@ -195,7 +195,7 @@ func (c *calicoCache) performDatastoreSync() {
 	// Get all objects created by policy controller from ETCD datastore.
 	etcdObjMap, err := c.ListFunc()
 	if err != nil {
-		log.Error(err)
+		log.WithError(err).Errorf("unable to list objects from ETCD while reconciling.")
 		return
 	}
 

@@ -73,7 +73,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err != nil {
-				log.Error(err)
+				log.WithError(err).Error("Failed to generate key")
 				return
 			}
 
@@ -81,7 +81,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 
 			endpoint, err := podConverter.Convert(obj)
 			if err != nil {
-				log.Errorf("Error while converting %#v to endpoint.", obj)
+				log.WithError(err).Errorf("Error while converting %#v to endpoint.", obj)
 				return
 			}
 
@@ -95,7 +95,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 			key, err := cache.MetaNamespaceKeyFunc(newObj)
 
 			if err != nil {
-				log.Error(err)
+				log.WithError(err).Error("Failed to generate key")
 				return
 			}
 
@@ -105,7 +105,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 
 			endpoint, err := podConverter.Convert(newObj)
 			if err != nil {
-				log.Errorf("Error while converting %#v to endpoint.", newObj)
+				log.WithError(err).Errorf("Error while converting %#v to endpoint.", newObj)
 				return
 			}
 
@@ -122,13 +122,13 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 			log.Infof("Got DELETE event for pod: %s\n", key)
 
 			if err != nil {
-				log.Error(err)
+				log.WithError(err).Error("Failed to generate key")
 				return
 			}
 
 			endpoint, err := podConverter.Convert(obj)
 			if err != nil {
-				log.Errorf("Error while converting %#v to endpoint.", obj)
+				log.WithError(err).Errorf("Error while converting %#v to endpoint.", obj)
 				return
 			}
 
@@ -275,8 +275,7 @@ func (c *PodController) handleErr(err error, key string) {
 
 	// This controller retries 5 times if something goes wrong. After that, it stops trying.
 	if workqueue.NumRequeues(key) < 5 {
-		log.Errorf("Error syncing pod %v: %v", key, err)
-
+		log.WithError(err).Errorf("Error syncing pod %v: %v", key, err)
 		// Re-enqueue the key rate limited. Based on the rate limiter on the
 		// queue and the re-enqueue history, the key will be processed later again.
 		workqueue.AddRateLimited(key)
@@ -287,7 +286,7 @@ func (c *PodController) handleErr(err error, key string) {
 	
 	// Report to an external entity that, even after several retries, we could not successfully process this key
 	uruntime.HandleError(err)
-	log.Errorf("Dropping pod %q out of the queue: %v", key, err)
+	log.WithError(err).Errorf("Dropping pod %q out of the queue: %v", key, err)
 }
 
 // populateEndpointCache() Loads map of workload endpoint objects from ETCD datastore
