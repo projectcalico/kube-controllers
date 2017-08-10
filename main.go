@@ -15,6 +15,7 @@ import (
 func main() {
 	logLevel, err := log.ParseLevel(os.Getenv("LOG_LEVEL"))
 	if err != nil {
+
 		// Defaulting log level to INFO
 		logLevel = log.InfoLevel
 	}
@@ -23,6 +24,7 @@ func main() {
 
 	reconcilerPeriod, exists := os.LookupEnv("RECONCILER_PERIOD")
 	if !exists {
+		
 		// Defaulting to 5 mins
 		reconcilerPeriod = "5m"
 	}

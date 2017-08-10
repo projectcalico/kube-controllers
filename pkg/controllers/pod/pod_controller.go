@@ -40,7 +40,6 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 		filteredPods := make(map[string]interface{})
 
 		// Get all workloadEndpoints for kubernetes orchestrator from ETCD datastore
-
 		workloadEndpoints, err := calicoClient.WorkloadEndpoints().List(api.WorkloadEndpointMetadata{
 			Orchestrator: "k8s",
 		})
@@ -89,6 +88,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 
 			workloadEndpoint := endpoint.(api.WorkloadEndpoint)
 			calicoKey := podConverter.GetKey(workloadEndpoint)
+
 			// Add workloadID:Labels in labelCache
 			labelCache.Prime(calicoKey, workloadEndpoint.Metadata.Labels)
 		},
@@ -112,6 +112,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 
 			workloadEndpoint := endpoint.(api.WorkloadEndpoint)
 			calicoKey := podConverter.GetKey(workloadEndpoint)
+
 			// Add workloadID:Labels in labelCache
 			labelCache.Set(calicoKey, workloadEndpoint.Metadata.Labels)
 		},
@@ -189,6 +190,7 @@ func (c *PodController) processNextItem() bool {
 	if quit {
 		return false
 	}
+
 	// Tell the queue that we are done with processing this key. This unblocks the key for other workers
 	// This allows safe parallel processing because two nodes with the same key are never processed in
 	// parallel.
@@ -220,6 +222,7 @@ func (c *PodController) syncToCalico(key string) error {
 
 			endpoint, exists = c.endpointCache[key]
 			if !exists {
+
 				// No endpoint in etcd - this means the pod hasn't been
 				// created by the CNI plugin yet. Just wait until it has been.
 				// This can only be hit when labels for a pod change before
@@ -241,11 +244,13 @@ func (c *PodController) syncToCalico(key string) error {
 			_, err := c.calicoClient.WorkloadEndpoints().Update(&endpoint)
 
 			if err == nil {
+
 				// Update endpoint cache as well with modified endpoint.
 				c.endpointCache[key] = endpoint
 			}
 
 			if _, ok := err.(errors.ErrorResourceDoesNotExist); ok {
+
 				// Endpoint not yet created by CNI plugin.
 				err = nil
 			}
@@ -261,6 +266,7 @@ func (c *PodController) syncToCalico(key string) error {
 func (c *PodController) handleErr(err error, key string) {
 	workqueue := c.labelCache.GetQueue()
 	if err == nil {
+
 		// Forget about the #AddRateLimited history of the key on every successful synchronization.
 		// This ensures that future processing of updates for this key is not delayed because of
 		// an outdated error history.
@@ -279,6 +285,7 @@ func (c *PodController) handleErr(err error, key string) {
 	}
 
 	workqueue.Forget(key)
+	
 	// Report to an external entity that, even after several retries, we could not successfully process this key
 	uruntime.HandleError(err)
 	log.Errorf("Dropping pod %q out of the queue: %v", key, err)

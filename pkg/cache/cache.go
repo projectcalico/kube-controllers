@@ -217,12 +217,14 @@ func (c *calicoCache) performDatastoreSync() {
 
 		cachedObj, exists := c.Get(key)
 		if !exists {
+			
 			// Does not exists in calico cache. Delete on ETCD as well.
 			c.workqueue.Add(key)
 			continue
 		}
 
 		if _, exists := etcdObjMap[key]; !exists {
+
 			// Exists in calico cache but has got deleted on ETCD datastore.
 			// Recreate it.
 			c.workqueue.Add(key)
@@ -232,6 +234,7 @@ func (c *calicoCache) performDatastoreSync() {
 		etcdObj := etcdObjMap[key]
 
 		if !reflect.DeepEqual(etcdObj, cachedObj) {
+			
 			// ETCD copy of object is deviated from Calico cache
 			c.workqueue.Add(key)
 			continue
