@@ -1,9 +1,9 @@
 package cache
 
 import (
-	log "github.com/Sirupsen/logrus"
 	"github.com/patrickmn/go-cache"
 	calicoClient "github.com/projectcalico/libcalico-go/lib/client"
+	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/util/workqueue"
 	"reflect"
 	"time"

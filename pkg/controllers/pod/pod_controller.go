@@ -1,13 +1,13 @@
 package pod
 
 import (
-	log "github.com/Sirupsen/logrus"
 	calicocache "github.com/projectcalico/k8s-policy/pkg/cache"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/controller"
 	"github.com/projectcalico/k8s-policy/pkg/converter"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	"github.com/projectcalico/libcalico-go/lib/errors"
+	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/fields"
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -59,7 +59,6 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 		return filteredPods, nil
 	}
 
-
 	cacheArgs := calicocache.ResourceCacheArgs{
 		ListFunc:   listFunc,
 		Client:     calicoClient,
@@ -68,8 +67,6 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 
 	labelCache := calicocache.NewResourceCache(cacheArgs)
 	endpointCache := make(map[string]api.WorkloadEndpoint)
-
-	
 
 	// create the watcher
 	listWatcher := cache.NewListWatchFromClient(k8sClientset.Core().RESTClient(), "pods", "", fields.Everything())
@@ -252,9 +249,9 @@ func (c *PodController) syncToCalico(key string) error {
 				// Update endpoint cache as well with modified endpoint.
 				c.endpointCache[key] = endpoint
 			}
-			
+
 			if _, ok := err.(errors.ErrorResourceDoesNotExist); ok {
-				// Endpoint not yet created by CNI plugin. 
+				// Endpoint not yet created by CNI plugin.
 				err = nil
 			}
 

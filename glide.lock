@@ -1,5 +1,5 @@
-hash: 4c3a6fef323dc909429dce6c78c0f1517e1a0c42acea8374792f1f0c3bc6f56c
-updated: 2017-08-02T09:26:01.979380659+01:00
+hash: 4fd36a06bf5070de491bbf32475537b63568c30dfb0486fbf648770f92adb3ae
+updated: 2017-08-08T12:38:22.426776962-07:00
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -7,11 +7,10 @@ imports:
   - compute/metadata
   - internal
 - name: github.com/coreos/etcd
-  version: ae748716e6bb66cfb6985fce215ce440c018037c
+  version: 17ae440991da3bdb2df4309936dd2074f66ec394
   subpackages:
   - client
   - pkg/pathutil
-  - pkg/srv
   - pkg/tlsutil
   - pkg/transport
   - pkg/types
@@ -25,7 +24,7 @@ imports:
   - oauth2
   - oidc
 - name: github.com/coreos/go-semver
-  version: 8ab6407b697782a06568d4b7f1db25550ec2e4c6
+  version: 568e959cd89871e61434c1143528d9162da89ef2
   subpackages:
   - semver
 - name: github.com/coreos/pkg
@@ -98,7 +97,7 @@ imports:
 - name: github.com/projectcalico/go-yaml-wrapper
   version: 598e54215bee41a19677faa4f0c32acd2a87eb56
 - name: github.com/projectcalico/libcalico-go
-  version: 73b7a646d0d29d01ff0a63ea5b03beac0906ea7c
+  version: d57562ced98d850282636bb5da16c840ea74b7df
   subpackages:
   - lib/api
   - lib/api/unversioned
@@ -129,8 +128,6 @@ imports:
   version: 5bd2802263f21d8788851d5305584c82a5c75d7e
 - name: github.com/satori/go.uuid
   version: 5bf94b69c6b68ee1b541973bb8e1144db23a194b
-- name: github.com/Sirupsen/logrus
-  version: ba1b36c82c5e05c4f912a88eab0dcd91a171688f
 - name: github.com/sirupsen/logrus
   version: ba1b36c82c5e05c4f912a88eab0dcd91a171688f
 - name: github.com/spf13/pflag
@@ -160,7 +157,7 @@ imports:
   - jws
   - jwt
 - name: golang.org/x/sys
-  version: 8f0908ab3b2457e2e15403d3697c9ef5cb4b57a9
+  version: 47bdb838cce8879fca08207206a5dfde2f2538bc
   subpackages:
   - unix
 - name: golang.org/x/text
