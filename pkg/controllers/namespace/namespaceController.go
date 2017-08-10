@@ -72,7 +72,7 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 	indexer, informer := cache.NewIndexerInformer(listWatcher, &v1.Namespace{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
-			log.Infof("Got ADD event for namespace: %s\n", key)
+			log.Debugf("Got ADD event for namespace: %s\n", key)
 
 			if err != nil {
 				log.WithError(err).Error("Failed to generate key")
@@ -93,7 +93,7 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 		UpdateFunc: func(oldObj interface{}, newObj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(newObj)
 
-			log.Infof("Got UPDATE event for namespace: %s\n", key)
+			log.Debugf("Got UPDATE event for namespace: %s\n", key)
 			log.Debugf("Old object: %#v\n", oldObj)
 			log.Debugf("New object: %#v\n", newObj)
 
@@ -126,7 +126,7 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
 			// key function.
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-			log.Infof("Got DELETE event for namespace: %s\n", key)
+			log.Debugf("Got DELETE event for namespace: %s\n", key)
 
 			if err != nil {
 				log.WithError(err).Error("Failed to generate key")
