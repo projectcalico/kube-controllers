@@ -56,16 +56,8 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 		return filteredProfiles, nil
 	}
 
-	// Function returns key of the object in kubernetes format.
-	keyFunc := func(obj interface{}) string {
-		profile := obj.(api.Profile)
-		key := profile.Metadata.Name
-		return key
-	}
-
 	cacheArgs := calicocache.ResourceCacheArgs{
 		ListFunc:   listFunc,
-		KeyFunc:    keyFunc,
 		Client:     calicoClient,
 		ObjectType: reflect.TypeOf(api.Profile{}), // Restrict cache to store calico profiles only.
 	}
@@ -94,8 +86,10 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				return
 			}
 			
-			// Add profileName:*profile in calicoCache
-			ccache.Set(profile.(api.Profile).Metadata.Name, profile)
+			calicoKey := namespaceConverter.GetKey(profile)
+
+			// Add key:profile in calicoCache
+			ccache.Set(calicoKey, profile)
 		},
 		UpdateFunc: func(oldObj interface{}, newObj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(newObj)
@@ -124,8 +118,10 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				return
 			}
 
-			// Add profileName:profile in calicoCache
-			ccache.Set(profile.(api.Profile).Metadata.Name, profile)
+			calicoKey := namespaceConverter.GetKey(profile)
+
+			// Add key:profile in calicoCache
+			ccache.Set(calicoKey, profile)
 		},
 		DeleteFunc: func(obj interface{}) {
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
@@ -143,7 +139,8 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				log.WithError(err).Errorf("Error while converting %#v to calico profile.", obj)
 				return
 			}
-			ccache.Delete(profile.(api.Profile).Metadata.Name)
+			calicoKey := namespaceConverter.GetKey(profile)
+			ccache.Delete(calicoKey)
 		},
 	}, cache.Indexers{})
 

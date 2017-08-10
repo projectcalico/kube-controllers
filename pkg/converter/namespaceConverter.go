@@ -48,3 +48,13 @@ func (p *namespaceConverter) Convert(k8sObj interface{}) (interface{}, error) {
 
 	return *profile, nil
 }
+
+// GetKey returns name of the namespace as key. 
+func (p *namespaceConverter) GetKey(obj interface{}) string {
+	
+	if reflect.TypeOf(obj) != reflect.TypeOf(api.Profile{}) {
+		log.Fatalf("can not construct key for object %#v. Object is not of type api.WorkloadEndpoint", obj)	
+	}
+	profile := obj.(api.Profile)
+	return profile.Metadata.Name
+}
