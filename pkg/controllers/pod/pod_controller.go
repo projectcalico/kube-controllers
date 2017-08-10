@@ -212,11 +212,13 @@ func (c *PodController) syncToCalico(key string) error {
 		endpoint, exists := c.endpointCache[key]
 
 		if !exists {
-			log.Errorf("No endpoint for %s in cache, loading", key)
+			log.Errorf("no endpoint for %s in cache, loading", key)
 
 			// Load endpoint cache. Retry when failed.
-			for err := c.populateEndpointCache(); err != nil; {
-				log.WithError(err).Errorf("Failed to load workload endpoint cache, retrying.")
+			err := c.populateEndpointCache()
+			if err != nil {
+				log.WithError(err).Error("failed to load workload endpoint cache")
+				return err
 			}
 
 			endpoint, exists = c.endpointCache[key]
@@ -226,7 +228,7 @@ func (c *PodController) syncToCalico(key string) error {
 				// created by the CNI plugin yet. Just wait until it has been.
 				// This can only be hit when labels for a pod change before
 				//  the pod has been deployed, so should be pretty uncommon.
-				log.Errorf("Pod %s hasn't been created by the CNI plugin yet.", key)
+				log.Infof("Pod %s hasn't been created by the CNI plugin yet.", key)
 				return nil
 			}
 		}
@@ -242,7 +244,10 @@ func (c *PodController) syncToCalico(key string) error {
 			log.Infof("Updating endpoint %s with labels %#v on ETCD \n", key, newLabels)
 			_, err := c.calicoClient.WorkloadEndpoints().Update(&endpoint)
 
-			if err == nil {
+			if err != nil {
+				log.WithError(err).Errorf("failed to update workload endpoint %s", key)
+				return err
+			}else{
 
 				// Update endpoint cache as well with modified endpoint.
 				c.endpointCache[key] = endpoint
