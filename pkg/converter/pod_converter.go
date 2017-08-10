@@ -2,8 +2,8 @@ package converter
 
 import (
 	"fmt"
-	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/libcalico-go/lib/api"
+	log "github.com/sirupsen/logrus"
 	k8sApiV1 "k8s.io/client-go/pkg/api/v1"
 	"reflect"
 )
