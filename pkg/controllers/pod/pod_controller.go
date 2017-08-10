@@ -32,29 +32,28 @@ type PodController struct {
 func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.Client) controller.Controller {
 	podConverter := converter.NewPodConverter()
 
-	// Function returns map of podName:podObject stored by policy controller
+	// Function returns map of key->workloadEndpoint stored by policy controller
 	// on ETCD datastore. Indentifies controller writen objects by
 	// their naming convention.
 	listFunc := func() (map[string]interface{}, error) {
 
-		filteredPods := make(map[string]interface{})
+		wepMap := make(map[string]interface{})
 
 		// Get all workloadEndpoints for kubernetes orchestrator from ETCD datastore
 		workloadEndpoints, err := calicoClient.WorkloadEndpoints().List(api.WorkloadEndpointMetadata{
 			Orchestrator: "k8s",
 		})
 		if err != nil {
-			return filteredPods, err
+			return wepMap, err
 		}
 
-		// Filter out only objects that are written by policy controller
 		for _, endpoint := range workloadEndpoints.Items {
 
 			key := podConverter.GetKey(endpoint)
-			filteredPods[key] = endpoint.Metadata.Labels
+			wepMap[key] = endpoint.Metadata.Labels
 		}
-		log.Debugf("Found %d pods in calico ETCD:", len(filteredPods))
-		return filteredPods, nil
+		log.Debugf("Found %d pods in calico ETCD:", len(wepMap))
+		return wepMap, nil
 	}
 
 	cacheArgs := calicocache.ResourceCacheArgs{
@@ -80,8 +79,8 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 
 			log.Infof("Got ADD event for pod: %s\n", key)
 
-			endpoint, conversionErr := podConverter.Convert(obj)
-			if conversionErr != nil {
+			endpoint, err := podConverter.Convert(obj)
+			if err != nil {
 				log.Errorf("Error while converting %#v to endpoint.", obj)
 				return
 			}
@@ -104,8 +103,8 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 			log.Debugf("Old object: %#v\n", oldObj)
 			log.Debugf("New object: %#v\n", newObj)
 
-			endpoint, conversionErr := podConverter.Convert(newObj)
-			if conversionErr != nil {
+			endpoint, err := podConverter.Convert(newObj)
+			if err != nil {
 				log.Errorf("Error while converting %#v to endpoint.", newObj)
 				return
 			}
@@ -127,8 +126,8 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 				return
 			}
 
-			endpoint, conversionErr := podConverter.Convert(obj)
-			if conversionErr != nil {
+			endpoint, err := podConverter.Convert(obj)
+			if err != nil {
 				log.Errorf("Error while converting %#v to endpoint.", obj)
 				return
 			}
