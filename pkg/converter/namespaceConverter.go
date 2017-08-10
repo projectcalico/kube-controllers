@@ -22,7 +22,6 @@ func NewNamespaceConverter() Converter {
 	return &namespaceConverter{}
 }
 func (p *namespaceConverter) Convert(k8sObj interface{}) (interface{}, error) {
-
 	if reflect.TypeOf(k8sObj).String() != "*v1.Namespace" {
 		log.Fatalf("can not convert object %#v to calico profile. Object is not of type *v1.Namespace", k8sObj)
 	}

@@ -32,12 +32,10 @@ type NamespaceController struct {
 
 // NewNamespaceController Constructor for NamespaceController
 func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *client.Client) controller.Controller {
-
 	// Function returns map of profile_name:object stored by policy controller
 	// on ETCD datastore. Indentifies controller writen objects by
 	// their naming convention.
 	listFunc := func() (map[string]interface{}, error) {
-
 		filteredProfiles := make(map[string]interface{})
 
 		// Get all profile objects from ETCD datastore
@@ -82,7 +80,6 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 	// whenever the kubernetes cache is updated, changes get reflected in calico cache as well.
 	indexer, informer := cache.NewIndexerInformer(listWatcher, &v1.Namespace{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			log.Infof("Got ADD event for namespace: %s\n", key)
 
@@ -101,7 +98,6 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 			ccache.Set(profile.(api.Profile).Metadata.Name, profile)
 		},
 		UpdateFunc: func(oldObj interface{}, newObj interface{}) {
-
 			key, err := cache.MetaNamespaceKeyFunc(newObj)
 
 			log.Infof("Got UPDATE event for namespace: %s\n", key)
@@ -213,7 +209,6 @@ func (c *NamespaceController) processNextItem() bool {
 // syncToCalico syncs the given update to Calico's etcd, as well as the in-memory cache
 // of Calico objects.
 func (c *NamespaceController) syncToCalico(key string) error {
-
 	// Check if it exists in our cache.
 	obj, exists := c.calicoObjCache.Get(key)
 
