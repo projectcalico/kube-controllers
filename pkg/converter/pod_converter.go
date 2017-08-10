@@ -19,7 +19,6 @@ func NewPodConverter() Converter {
 	return &podConverter{}
 }
 func (p *podConverter) Convert(k8sObj interface{}) (interface{}, error) {
-
 	if reflect.TypeOf(k8sObj) != reflect.TypeOf(&k8sApiV1.Pod{}) {
 		log.Fatalf("can not convert object %#v to workloadEndpoint. Object is not of type *v1.Pod", k8sObj)
 	}
@@ -42,12 +41,11 @@ func (p *podConverter) Convert(k8sObj interface{}) (interface{}, error) {
 	return *endpoint, nil
 }
 
-// GetKey returns workloadID of the object as key. 
+// GetKey returns workloadID of the object as key.
 // workloadID is namespace.name for kubernetes pod.
 func (p *podConverter) GetKey(obj interface{}) string {
-	
 	if reflect.TypeOf(obj) != reflect.TypeOf(api.WorkloadEndpoint{}) {
-		log.Fatalf("can not construct key for object %#v. Object is not of type api.WorkloadEndpoint", obj)	
+		log.Fatalf("can not construct key for object %#v. Object is not of type api.WorkloadEndpoint", obj)
 	}
 	endpoint := obj.(api.WorkloadEndpoint)
 	return endpoint.Metadata.Workload

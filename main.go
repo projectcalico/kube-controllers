@@ -1,20 +1,18 @@
 package main
 
 import (
-	"os"
 	"flag"
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/namespace"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/pod"
-	"github.com/projectcalico/k8s-policy/pkg/controllers/networkPolicy"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/tools/clientcmd"
+	"os"
 )
 
 func main() {
-
 	logLevel, err := log.ParseLevel(os.Getenv("LOG_LEVEL"))
 	if err != nil {
 		// Defaulting log level to INFO
@@ -61,7 +59,6 @@ func main() {
 
 // Fuction that returns kubernetes and calico clients.
 func getClients() (*kubernetes.Clientset, *client.Client, error) {
-
 	cconfig, err := client.LoadClientConfig("")
 	if err != nil {
 		return nil, nil, err

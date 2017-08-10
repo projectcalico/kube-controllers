@@ -30,7 +30,6 @@ type PodController struct {
 
 // NewPodController Constructor for PodController
 func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.Client) controller.Controller {
-
 	podConverter := converter.NewPodConverter()
 
 	// Function returns map of podName:podObject stored by policy controller
@@ -59,17 +58,13 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 		return filteredPods, nil
 	}
 
-
 	cacheArgs := calicocache.ResourceCacheArgs{
 		ListFunc:   listFunc,
-		Client:     calicoClient,
 		ObjectType: reflect.TypeOf(map[string]string{}), // Restrict cache to store pod labels only.
 	}
 
 	labelCache := calicocache.NewResourceCache(cacheArgs)
 	endpointCache := make(map[string]api.WorkloadEndpoint)
-
-	
 
 	// create the watcher
 	listWatcher := cache.NewListWatchFromClient(k8sClientset.Core().RESTClient(), "pods", "", fields.Everything())
@@ -78,7 +73,6 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 	// whenever the kubernetes cache is updated, changes get reflected in calico cache as well.
 	indexer, informer := cache.NewIndexerInformer(listWatcher, &v1.Pod{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err != nil {
 				log.Error(err)
@@ -99,7 +93,6 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 			labelCache.Prime(calicoKey, workloadEndpoint.Metadata.Labels)
 		},
 		UpdateFunc: func(oldObj interface{}, newObj interface{}) {
-
 			key, err := cache.MetaNamespaceKeyFunc(newObj)
 
 			if err != nil {
@@ -211,7 +204,6 @@ func (c *PodController) processNextItem() bool {
 
 // syncToCalico syncs the given update to Calico's etcd
 func (c *PodController) syncToCalico(key string) error {
-
 	// Check if it exists in our cache.
 	if labels, exists := c.labelCache.Get(key); exists {
 
@@ -252,9 +244,9 @@ func (c *PodController) syncToCalico(key string) error {
 				// Update endpoint cache as well with modified endpoint.
 				c.endpointCache[key] = endpoint
 			}
-			
+
 			if _, ok := err.(errors.ErrorResourceDoesNotExist); ok {
-				// Endpoint not yet created by CNI plugin. 
+				// Endpoint not yet created by CNI plugin.
 				err = nil
 			}
 
@@ -294,7 +286,6 @@ func (c *PodController) handleErr(err error, key string) {
 
 // populateEndpointCache() Loads map of workload endpoint objects from ETCD datastore
 func (c *PodController) populateEndpointCache() error {
-
 	// List all workload endpoints for kubernetes orchestrator
 	workloadEndpointList, err := c.calicoClient.WorkloadEndpoints().List(api.WorkloadEndpointMetadata{
 		Orchestrator: "k8s",
