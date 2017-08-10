@@ -77,7 +77,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 				return
 			}
 
-			log.Infof("Got ADD event for pod: %s\n", key)
+			log.Debugf("Got ADD event for pod: %s\n", key)
 
 			endpoint, err := podConverter.Convert(obj)
 			if err != nil {
@@ -99,7 +99,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 				return
 			}
 
-			log.Infof("Got UPDATE event for pod: %s\n", key)
+			log.Debugf("Got UPDATE event for pod: %s\n", key)
 			log.Debugf("Old object: %#v\n", oldObj)
 			log.Debugf("New object: %#v\n", newObj)
 
@@ -119,7 +119,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
 			// key function.
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-			log.Infof("Got DELETE event for pod: %s\n", key)
+			log.Debugf("Got DELETE event for pod: %s\n", key)
 
 			if err != nil {
 				log.WithError(err).Error("Failed to generate key")
