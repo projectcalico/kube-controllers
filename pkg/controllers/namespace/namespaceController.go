@@ -84,13 +84,13 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 			log.Infof("Got ADD event for namespace: %s\n", key)
 
 			if err != nil {
-				log.Error(err)
+				log.WithError(err).Error("Failed to generate key")
 				return
 			}
 
-			profile, conversionErr := namespaceConverter.Convert(obj)
-			if conversionErr != nil {
-				log.Errorf("Error while converting %#v to calico profile.", obj)
+			profile, err := namespaceConverter.Convert(obj)
+			if err != nil {
+				log.WithError(err).Errorf("Error while converting %#v to calico profile.", obj)
 				return
 			}
 			
@@ -105,7 +105,7 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 			log.Debugf("New object: %#v\n", newObj)
 
 			if err != nil {
-				log.Error(err)
+				log.WithError(err).Error("Failed to generate key")
 				return
 			}
 
@@ -118,9 +118,9 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				log.Debugf("Namespace %s is getting deleted.", newObj.(*v1.Namespace).ObjectMeta.GetName())
 				return
 			}
-			profile, conversionErr := namespaceConverter.Convert(newObj)
-			if conversionErr != nil {
-				log.Errorf("Error while converting %#v to calico profile.", newObj)
+			profile, err := namespaceConverter.Convert(newObj)
+			if err != nil {
+				log.WithError(err).Errorf("Error while converting %#v to calico profile.", newObj)
 				return
 			}
 
@@ -134,13 +134,13 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 			log.Infof("Got DELETE event for namespace: %s\n", key)
 
 			if err != nil {
-				log.Error(err)
+				log.WithError(err).Error("Failed to generate key")
 				return
 			}
 
-			profile, conversionErr := namespaceConverter.Convert(obj)
-			if conversionErr != nil {
-				log.Errorf("Error while converting %#v to calico profile.", obj)
+			profile, err := namespaceConverter.Convert(obj)
+			if err != nil {
+				log.WithError(err).Errorf("Error while converting %#v to calico profile.", obj)
 				return
 			}
 			ccache.Delete(profile.(api.Profile).Metadata.Name)
@@ -253,8 +253,8 @@ func (c *NamespaceController) handleErr(err error, key string) {
 
 	// This controller retries 5 times if something goes wrong. After that, it stops trying.
 	if workqueue.NumRequeues(key) < 5 {
-		log.Errorf("Error syncing namespace %v: %v", key, err)
-
+		
+		log.WithError(err).Errorf("Error syncing namespace %v: %v", key, err)
 		// Re-enqueue the key rate limited. Based on the rate limiter on the
 		// queue and the re-enqueue history, the key will be processed later again.
 		workqueue.AddRateLimited(key)
@@ -265,5 +265,5 @@ func (c *NamespaceController) handleErr(err error, key string) {
 	
 	// Report to an external entity that, even after several retries, we could not successfully process this key
 	uruntime.HandleError(err)
-	log.Errorf("Dropping namespace %q out of the queue: %v", key, err)
+	log.WithError(err).Errorf("Dropping namespace %q out of the queue: %v", key, err)
 }
