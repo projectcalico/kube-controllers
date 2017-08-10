@@ -96,6 +96,7 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				log.Errorf("Error while converting %#v to calico profile.", obj)
 				return
 			}
+			
 			// Add profileName:*profile in calicoCache
 			ccache.Set(profile.(api.Profile).Metadata.Name, profile)
 		},
@@ -113,6 +114,7 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 			}
 
 			if newObj.(*v1.Namespace).Status.Phase == "Terminating" {
+
 				// If object status is updated to "Terminating", object
 				// is getting deleted. Ignore this event. When deletion
 				// completes another DELETE event will be raised.
@@ -125,6 +127,7 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				log.Errorf("Error while converting %#v to calico profile.", newObj)
 				return
 			}
+
 			// Add profileName:profile in calicoCache
 			ccache.Set(profile.(api.Profile).Metadata.Name, profile)
 		},
@@ -193,6 +196,7 @@ func (c *NamespaceController) processNextItem() bool {
 	if quit {
 		return false
 	}
+
 	// Tell the queue that we are done with processing this key. This unblocks the key for other workers
 	// This allows safe parallel processing because two nodes with the same key are never processed in
 	// parallel.
@@ -229,7 +233,7 @@ func (c *NamespaceController) syncToCalico(key string) error {
 		}
 
 		return err
-	} else {
+	}else{
 
 		var p api.Profile
 		p = obj.(api.Profile)
@@ -244,6 +248,7 @@ func (c *NamespaceController) syncToCalico(key string) error {
 func (c *NamespaceController) handleErr(err error, key string) {
 	workqueue := c.calicoObjCache.GetQueue()
 	if err == nil {
+
 		// Forget about the #AddRateLimited history of the key on every successful synchronization.
 		// This ensures that future processing of updates for this key is not delayed because of
 		// an outdated error history.
@@ -262,6 +267,7 @@ func (c *NamespaceController) handleErr(err error, key string) {
 	}
 
 	workqueue.Forget(key)
+	
 	// Report to an external entity that, even after several retries, we could not successfully process this key
 	uruntime.HandleError(err)
 	log.Errorf("Dropping namespace %q out of the queue: %v", key, err)
