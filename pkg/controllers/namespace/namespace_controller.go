@@ -1,22 +1,20 @@
 package namespace
 
 import (
-	log "github.com/Sirupsen/logrus"
 	calicocache "github.com/projectcalico/k8s-policy/pkg/cache"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/controller"
 	"github.com/projectcalico/k8s-policy/pkg/converter"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	"github.com/projectcalico/libcalico-go/lib/errors"
+	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/fields"
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
 	"strings"
-	"time"
 )
 
 // NamespaceController Implements Controller interface
@@ -32,6 +30,8 @@ type NamespaceController struct {
 
 // NewNamespaceController Constructor for NamespaceController
 func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *client.Client) controller.Controller {
+
+	namespaceConverter := converter.NewNamespaceConverter()
 
 	// Function returns map of profile_name:object stored by policy controller
 	// on ETCD datastore. Indentifies controller writen objects by
@@ -51,29 +51,21 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 
 			profileName := profile.Metadata.Name
 			if strings.HasPrefix(profileName, converter.ProfileNameFormat) {
-				filteredProfiles[profileName] = profile
+				key := namespaceConverter.GetKey(profile)
+				filteredProfiles[key] = profile
 			}
 		}
 		log.Debugf("Found %d profiles in calico ETCD:", len(filteredProfiles))
 		return filteredProfiles, nil
 	}
 
-	// Function returns key of the object in kubernetes format.
-	keyFunc := func(obj interface{}) string {
-		profile := obj.(api.Profile)
-		key := profile.Metadata.Name
-		return key
-	}
-
 	cacheArgs := calicocache.ResourceCacheArgs{
 		ListFunc:   listFunc,
-		KeyFunc:    keyFunc,
 		Client:     calicoClient,
 		ObjectType: reflect.TypeOf(api.Profile{}), // Restrict cache to store calico profiles only.
 	}
 
 	ccache := calicocache.NewResourceCache(cacheArgs)
-	namespaceConverter := converter.NewNamespaceConverter()
 
 	// create the watcher
 	listWatcher := cache.NewListWatchFromClient(k8sClientset.Core().RESTClient(), "namespaces", "", fields.Everything())
@@ -96,8 +88,10 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				log.Errorf("Error while converting %#v to calico profile.", obj)
 				return
 			}
-			// Add profileName:*profile in calicoCache
-			ccache.Set(profile.(api.Profile).Metadata.Name, profile)
+
+			calicoKey := namespaceConverter.GetKey(profile)
+			// Add key:*profile in calicoCache
+			ccache.Set(calicoKey, profile)
 		},
 		UpdateFunc: func(oldObj interface{}, newObj interface{}) {
 
@@ -125,8 +119,10 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				log.Errorf("Error while converting %#v to calico profile.", newObj)
 				return
 			}
-			// Add profileName:profile in calicoCache
-			ccache.Set(profile.(api.Profile).Metadata.Name, profile)
+
+			calicoKey := namespaceConverter.GetKey(profile)
+			// Add key:profile in calicoCache
+			ccache.Set(calicoKey, profile)
 		},
 		DeleteFunc: func(obj interface{}) {
 			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
@@ -144,7 +140,9 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				log.Errorf("Error while converting %#v to calico profile.", obj)
 				return
 			}
-			ccache.Delete(profile.(api.Profile).Metadata.Name)
+
+			calicoKey := namespaceConverter.GetKey(profile)
+			ccache.Delete(calicoKey)
 		},
 	}, cache.Indexers{})
 
@@ -174,7 +172,7 @@ func (c *NamespaceController) Run(threadiness int, reconcilerPeriod string, stop
 
 	// Start a number of worker threads to read from the queue.
 	for i := 0; i < threadiness; i++ {
-		go wait.Until(c.runWorker, time.Second, stopCh)
+		go c.runWorker()
 	}
 
 	<-stopCh
