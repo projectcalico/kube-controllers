@@ -59,7 +59,7 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 
 	cacheArgs := calicocache.ResourceCacheArgs{
 		ListFunc:   listFunc,
-		ObjectType: reflect.TypeOf(api.Profile{}), // Restrict cache to store calico profiles only.
+		ObjectType: reflect.TypeOf(api.Profile{}),
 	}
 
 	ccache := calicocache.NewResourceCache(cacheArgs)
