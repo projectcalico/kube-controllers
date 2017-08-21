@@ -1,4 +1,4 @@
-package networkPolicy
+package networkpolicy
 
 import (
 	"reflect"
@@ -17,7 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/tools/cache"
-	k8sNetV1 "k8s.io/kubernetes/pkg/apis/extensions"
+	k8sNetV1 "k8s.io/api/networking/v1"
 )
 
 // PolicyController Implements Controller interface
@@ -36,12 +36,12 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 	policyConverter := converter.NewPolicyConverter()
 
 	// Function returns map of policyName:policy stored by policy controller
-	// on ETCD datastore.
+	// in datastore.
 	listFunc := func() (map[string]interface{}, error) {
 
 		npMap := make(map[string]interface{})
 
-		// Get all policies from ETCD datastore
+		// Get all policies from datastore
 		calicoPolicies, err := calicoClient.Policy().List(api.PolicyMetadata{})
 		if err != nil {
 			return npMap, err
@@ -53,7 +53,7 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 			npMap[policyName] = policy
 		}
 
-		log.Debugf("Found %d policies in calico ETCD:", len(npMap))
+		log.Debugf("Found %d policies in calico datastore:", len(npMap))
 		return npMap, nil
 	}
 
@@ -159,7 +159,7 @@ func (c *PolicyController) Run(threadiness int, reconcilerPeriod string, stopCh 
 	log.Info("Starting network policy controller")
 
 	// Start Calico cache. Cache gets loaded with objects
-	// from ETCD datastore.
+	// from datastore.
 	c.calicoObjCache.Run(reconcilerPeriod)
 
 	go c.informer.Run(stopCh)
@@ -204,7 +204,7 @@ func (c *PolicyController) processNextItem() bool {
 	return true
 }
 
-// syncToCalico syncs the given update to Calico's etcd, as well as the in-memory cache
+// syncToCalico syncs the given update to Calico's datastore, as well as the in-memory cache
 // of Calico objects.
 func (c *PolicyController) syncToCalico(key string) error {
 
@@ -213,21 +213,21 @@ func (c *PolicyController) syncToCalico(key string) error {
 
 	if !exists {
 		log.Debugf("Network policy %s does not exist anymore on kubernetes\n", key)
-		log.Debugf("Deleting policy %s on ETCD \n", key)
+		log.Debugf("Deleting policy %s on datastore \n", key)
 
 		err := c.calicoClient.Policies().Delete(api.PolicyMetadata{
 			Name: key,
 		})
 
 		// Let Delete() operation be idompotent. Ignore the error while deletion if
-		// object does not exists on ETCD already.
+		// object does not exists on datastore already.
 		if _, ok := err.(errors.ErrorResourceDoesNotExist); ok {
 			err = nil
 		}
 	} else {
 		var p api.Policy
 		p = obj.(api.Policy)
-		log.Infof("Applying network policy %s on ETCD \n", key)
+		log.Infof("Applying network policy %s on datastore \n", key)
 		_, err := c.calicoClient.Policies().Apply(&p)
 	}
 	return err
