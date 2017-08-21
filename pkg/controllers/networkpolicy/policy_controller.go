@@ -191,16 +191,19 @@ func (c *PolicyController) processNextItem() bool {
 		return false
 	}
 
+	// Update network policy on calico datastore
+	err := c.syncToCalico(key.(string))
+	if err != nil {
+
+		// Handle the error if something went wrong while updating network policy on calico datastore
+  		c.handleErr(err, key.(string))
+	}
+
 	// Tell the queue that we are done with processing this key. This unblocks the key for other workers
 	// This allows safe parallel processing because two nodes with the same key are never processed in
 	// parallel.
-	defer workqueue.Done(key)
+	workqueue.Done(key)
 
-	// Invoke the method containing the business logic
-	err := c.syncToCalico(key.(string))
-
-	// Handle the error if something went wrong during the execution of the business logic
-	c.handleErr(err, key.(string))
 	return true
 }
 
