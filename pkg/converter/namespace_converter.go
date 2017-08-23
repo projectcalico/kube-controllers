@@ -30,7 +30,7 @@ func (p *namespaceConverter) Convert(k8sObj interface{}) (interface{}, error) {
 	profile := api.NewProfile()
 
 	name := fmt.Sprintf(ProfileNameFormat+"%s", namespace.ObjectMeta.Name)
-	
+
 	// Generate the labels to apply to the profile, using a special prefix
 	// to indicate that these are the labels from the parent Kubernetes Namespace.
 	labels := map[string]string{}

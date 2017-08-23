@@ -3,15 +3,15 @@ package converter
 import (
 	"errors"
 	"fmt"
-	"reflect"
-	"strings"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
 	log "github.com/sirupsen/logrus"
-	k8sApiV1 "k8s.io/client-go/pkg/api/v1"
+	k8sNetV1 "k8s.io/api/networking/v1"
 	k8sMetaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8sNetV1 "k8s.io/kubernetes/pkg/apis/extensions"	
 	"k8s.io/apimachinery/pkg/util/intstr"
+	k8sApiV1 "k8s.io/client-go/pkg/api/v1"
+	"reflect"
+	"strings"
 )
 
 type policyConverter struct {
