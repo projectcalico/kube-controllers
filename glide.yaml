@@ -27,6 +27,4 @@ import:
   - tools/cache
   - tools/clientcmd
 - package: github.com/projectcalico/libcalico-go
-  version: v1.5.2
-- package: github.com/coreos/etcd
-  version: 17ae440991da3bdb2df4309936dd2074f66ec394
+  version: v1.6.0
