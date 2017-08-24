@@ -1,23 +1,23 @@
 package networkpolicy
 
 import (
-	"reflect"
-	"strings"
-	"time"
-	log "github.com/sirupsen/logrus"
 	calicocache "github.com/projectcalico/k8s-policy/pkg/cache"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/controller"
 	"github.com/projectcalico/k8s-policy/pkg/converter"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	"github.com/projectcalico/libcalico-go/lib/errors"
+	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/fields"
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/pkg/api/v1"
+	k8sNetV1 "k8s.io/client-go/pkg/apis/networking/v1"
 	"k8s.io/client-go/tools/cache"
-	k8sNetV1 "k8s.io/api/networking/v1"
+	"reflect"
+	"strings"
+	"time"
 )
 
 // PolicyController Implements Controller interface
@@ -196,7 +196,7 @@ func (c *PolicyController) processNextItem() bool {
 	if err != nil {
 
 		// Handle the error if something went wrong while updating network policy on calico datastore
-  		c.handleErr(err, key.(string))
+		c.handleErr(err, key.(string))
 	}
 
 	// Tell the queue that we are done with processing this key. This unblocks the key for other workers

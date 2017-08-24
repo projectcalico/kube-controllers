@@ -226,7 +226,7 @@ func (c *NamespaceController) syncToCalico(key string) error {
 		}
 
 		return err
-	} else {
+	}else{
 
 		var p api.Profile
 		p = obj.(api.Profile)
@@ -260,7 +260,7 @@ func (c *NamespaceController) handleErr(err error, key string) {
 	}
 
 	workqueue.Forget(key)
-
+	
 	// Report to an external entity that, even after several retries, we could not successfully process this key
 	uruntime.HandleError(err)
 	log.WithError(err).Errorf("Dropping namespace %q out of the queue: %v", key, err)

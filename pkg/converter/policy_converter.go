@@ -6,10 +6,9 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
 	log "github.com/sirupsen/logrus"
-	k8sNetV1 "k8s.io/api/networking/v1"
 	k8sMetaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	k8sApiV1 "k8s.io/client-go/pkg/api/v1"
+	k8sNetV1 "k8s.io/client-go/pkg/apis/networking/v1"
 	"reflect"
 	"strings"
 )
@@ -78,7 +77,8 @@ func (p *policyConverter) calculatePodSelectors(podSelector k8sMetaV1.LabelSelec
 	var calicoSelectors []string
 
 	// PodSelectors only select pods from the Policy's namespace.
-	calicoSelectors = append(calicoSelectors, fmt.Sprintf(calicoSelectorFormat, k8sNamespaceLabel, p.k8sPolicy.ObjectMeta.Namespace))
+	// TODO(vinayak): fix k8sNamespacelable undefined
+	calicoSelectors = append(calicoSelectors, fmt.Sprintf(calicoSelectorFormat, "k8sNamespaceLabel", p.k8sPolicy.ObjectMeta.Namespace))
 
 	selectors, err := calculateSelectors(podSelector, "%s")
 	if err != nil {
@@ -229,7 +229,8 @@ func (p *policyConverter) generateToArgs(ports []k8sNetV1.NetworkPolicyPort) (ma
 			protocol = strings.ToLower(string(k8sApiV1.ProtocolTCP))
 		}
 
-		set, portList := setDefault(portsByProtocol, protocol, make([]numorstring.Port, 0))
+		//set, portList := setDefault(portsByProtocol, protocol, make([]numorstring.Port, 0))
+		_, portList := setDefault(portsByProtocol, protocol, make([]numorstring.Port, 0))
 
 		// Convert k8s Port in *intstr.IntOrString format to calico Port in numorstring.Port format.
 		calicoPort, err := numorstring.PortFromString(toPort.Port.String())
@@ -293,13 +294,14 @@ func (p *policyConverter) generateFromArgs(froms []k8sNetV1.NetworkPolicyPeer) (
 		} else if podsPresent {
 
 			log.Debugf("Allow from podSelector: %#v", fromClause.PodSelector)
-			selectors, err := calculateSelectors(fromClause.PodSelector, "%s")
+			selectors, err := calculateSelectors(*fromClause.PodSelector, "%s")
 			if err != nil {
 				return nil, err
 			}
 
 			// We can only select on pods in this namespace.
-			selectors = append(selectors, fmt.Sprintf(calicoSelectorFormat, k8sNamespaceLabel, p.k8sPolicy.ObjectMeta.Namespace))
+			// TODO: Fix namespace label
+			selectors = append(selectors, fmt.Sprintf(calicoSelectorFormat, "k8sNamespaceLabel", p.k8sPolicy.ObjectMeta.Namespace))
 			calicoSelectorsStr := strings.Join(selectors, " && ")
 
 			// Append the selector to the from args.
@@ -311,7 +313,7 @@ func (p *policyConverter) generateFromArgs(froms []k8sNetV1.NetworkPolicyPeer) (
 			// the per-namespace profile.  We can select on namespace labels
 			// using the "namespaceLabelKeyFormat" modifier.
 			log.Debugf("Allow from namespaceSelector: %#v", fromClause.NamespaceSelector)
-			selectors, err := calculateSelectors(fromClause.NamespaceSelector, namespaceLabelKeyFormat)
+			selectors, err := calculateSelectors(*fromClause.NamespaceSelector, namespaceLabelKeyFormat)
 			if err != nil {
 				return nil, err
 			}
@@ -321,7 +323,8 @@ func (p *policyConverter) generateFromArgs(froms []k8sNetV1.NetworkPolicyPeer) (
 
 				// Allow from all pods in all namespaces.
 				log.Debug("Allowing from all pods in all namespaces")
-				selector := fmt.Sprintf("has(%s)", k8sNamespaceLabel)
+				// TODO: Fix namespace label
+				selector := fmt.Sprintf("has(%s)", "k8sNamespaceLabel")
 				fromArgs = append(fromArgs, api.EntityRule{Selector: selector})
 			} else {
 

@@ -1,30 +1,28 @@
 package: github.com/projectcalico/k8s-policy
-description: Calico Policy Controller
-homepage: https://projectcalico.org
-license: Apache-2.0
 import:
+- package: github.com/patrickmn/go-cache
+- package: github.com/projectcalico/libcalico-go
+  version: v1.6.1
+  subpackages:
+  - lib/api
+  - lib/client
+  - lib/errors
+  - lib/numorstring
 - package: github.com/sirupsen/logrus
   version: ^0.10.0
-- package: github.com/kelseyhightower/envconfig
-  version: ~1.3.0
+- package: k8s.io/apimachinery
+  subpackages:
+  - pkg/apis/meta/v1
+  - pkg/fields
+  - pkg/util/runtime
+  - pkg/util/wait
 - package: k8s.io/client-go
-  version: 4a3ab2f5be5177366f8206fd79ce55ca80e417fa
+  version: v4.0.0
   subpackages:
   - kubernetes
-  - pkg/api
-  - pkg/api/errors
-  - pkg/api/meta
-  - pkg/api/unversioned
   - pkg/api/v1
-  - pkg/apis/extensions/v1beta1
-  - pkg/fields
-  - pkg/runtime
-  - pkg/runtime/schema
-  - pkg/runtime/serializer
-  - pkg/util/wait
-  - pkg/watch
-  - rest
+  - pkg/apis/networking/v1
+  - plugin/pkg/client/auth
   - tools/cache
   - tools/clientcmd
-- package: github.com/projectcalico/libcalico-go
-  version: v1.6.0
+  - util/workqueue
