@@ -4,6 +4,7 @@ import (
 	"flag"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/namespace"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/pod"
+	"github.com/projectcalico/k8s-policy/pkg/controllers/networkpolicy"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
@@ -51,6 +52,8 @@ func main() {
 		namespaceController := namespace.NewNamespaceController(k8sClientset, calicoClient)
 		go namespaceController.Run(5, reconcilerPeriod, stop)
 	case "policy":
+	    policyController := networkpolicy.NewPolicyController(k8sClientset, calicoClient)
+		go policyController.Run(5, reconcilerPeriod, stop)
 	default:
 		log.Fatal("Not a valid CONTROLLER_TYPE. Valid values are endpoint, profile, policy.")
 	}

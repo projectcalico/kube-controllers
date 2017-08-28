@@ -12,11 +12,9 @@ import (
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/pkg/api/v1"
 	k8sNetV1 "k8s.io/client-go/pkg/apis/networking/v1"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
-	"strings"
 	"time"
 )
 
@@ -42,7 +40,7 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 		npMap := make(map[string]interface{})
 
 		// Get all policies from datastore
-		calicoPolicies, err := calicoClient.Policy().List(api.PolicyMetadata{})
+		calicoPolicies, err := calicoClient.Policies().List(api.PolicyMetadata{})
 		if err != nil {
 			return npMap, err
 		}
@@ -65,19 +63,13 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 	ccache := calicocache.NewResourceCache(cacheArgs)
 
 	// create the watcher
-	listWatcher := cache.NewListWatchFromClient(k8sClientset.Core().RESTClient(), "networkpolicies", "", fields.Everything())
+	listWatcher := cache.NewListWatchFromClient(k8sClientset.ExtensionsV1beta1().RESTClient(), "networkpolicies", "", fields.Everything())
 
 	// Bind the calico cache to kubernetes cache with the help of an informer. This way we make sure that
 	// whenever the kubernetes cache is updated, changes get reflected in calico cache as well.
 	indexer, informer := cache.NewIndexerInformer(listWatcher, &k8sNetV1.NetworkPolicy{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			log.Debugf("Got ADD event for network policy: %s\n", key)
-
-			key, err := cache.MetaNamespaceKeyFunc(obj)
-			if err != nil {
-				log.WithError(err).Error("Failed to generate key")
-				return
-			}
+			log.Debugf("Got ADD event for network policy: %#v\n", obj)
 
 			policy, err := policyConverter.Convert(obj)
 			if err != nil {
@@ -91,28 +83,13 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 			ccache.Set(calicoKey, policy)
 		},
 		UpdateFunc: func(oldObj interface{}, newObj interface{}) {
-			log.Debugf("Got UPDATE event for network policy: %s\n", key)
+			log.Debugf("Got UPDATE event for network policy: %#v\n", oldObj)
 			log.Debugf("Old object: %#v\n", oldObj)
 			log.Debugf("New object: %#v\n", newObj)
 
-			key, err := cache.MetaNamespaceKeyFunc(newObj)
-			if err != nil {
-				log.WithError(err).Error("Failed to generate key")
-				return
-			}
-
-			if newObj.(*k8sNetV1.NetworkPolicy).Status.Phase == "Terminating" {
-				// If object status is updated to "Terminating", object
-				// is getting deleted. Ignore this event. When deletion
-				// completes another DELETE event will be raised.
-				// Let DeleteFunc handle that.
-				log.Debugf("Network policy %s is getting deleted.", newObj.(*k8sNetV1.NetworkPolicy).ObjectMeta.GetName())
-				return
-			}
-
 			policy, err := policyConverter.Convert(newObj)
 			if err != nil {
-				log.WithError(err).Errorf("Error while converting %#v to calico network policy.", obj)
+				log.WithError(err).Errorf("Error while converting %#v to calico network policy.", newObj)
 				return
 			}
 
@@ -122,15 +99,7 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 			ccache.Set(calicoKey, policy)
 		},
 		DeleteFunc: func(obj interface{}) {
-			log.Debugf("Got DELETE event for namespace: %s\n", key)
-
-			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
-			// key function.
-			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-			if err != nil {
-				log.WithError(err).Error("Failed to generate key")
-				return
-			}
+			log.Debugf("Got DELETE event for namespace: %#v\n", obj)
 
 			policy, err := policyConverter.Convert(obj)
 			if err != nil {
@@ -227,13 +196,14 @@ func (c *PolicyController) syncToCalico(key string) error {
 		if _, ok := err.(errors.ErrorResourceDoesNotExist); ok {
 			err = nil
 		}
-	} else {
+		return err
+	}else{
 		var p api.Policy
 		p = obj.(api.Policy)
 		log.Infof("Applying network policy %s on datastore \n", key)
 		_, err := c.calicoClient.Policies().Apply(&p)
+		return err
 	}
-	return err
 }
 
 // handleErr checks if an error happened and makes sure we will retry later.

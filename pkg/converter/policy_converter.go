@@ -6,15 +6,15 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
 	log "github.com/sirupsen/logrus"
-	k8sMetaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8sApiV1 "k8s.io/client-go/pkg/api/v1"
-	k8sNetV1 "k8s.io/client-go/pkg/apis/networking/v1"
-	"reflect"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/client-go/pkg/api/v1"
+	netv1 "k8s.io/client-go/pkg/apis/networking/v1"
+	//"reflect"
 	"strings"
 )
 
 type policyConverter struct {
-	k8sPolicy k8sNetV1.NetworkPolicy
+	k8sPolicy netv1.NetworkPolicy
 }
 
 // Format used by calico for selectors by calico
@@ -32,11 +32,11 @@ func NewPolicyConverter() Converter {
 	return &policyConverter{}
 }
 func (p *policyConverter) Convert(k8sObj interface{}) (interface{}, error) {
-	if reflect.TypeOf(k8sObj) != reflect.TypeOf(api.Policy{}) {
-		log.Fatalf("can not convert object %#v to calico profile. Object is not of type *k8sNetV1.Namespace", k8sObj)
-	}
+	//if reflect.TypeOf(k8sObj) != reflect.TypeOf(netv1.NetworkPolicy{}) {
+	//	log.Fatalf("can not convert object %#v to calico profile. Object is not of type *netv1.NetworkPolicy", k8sObj)
+	//}
 
-	p.k8sPolicy = k8sObj.(k8sNetV1.NetworkPolicy)
+	p.k8sPolicy = k8sObj.(netv1.NetworkPolicy)
 
 	calicoPolicy := api.NewPolicy()
 
@@ -71,7 +71,7 @@ func (p *policyConverter) Convert(k8sObj interface{}) (interface{}, error) {
 
 // calculateSelectors Generates the Calico representation of the policy.spec.podSelector for
 // this Policy. Returns the endpoint selector in the Calico datamodel format.
-func (p *policyConverter) calculatePodSelectors(podSelector k8sMetaV1.LabelSelector) (string, error) {
+func (p *policyConverter) calculatePodSelectors(podSelector metav1.LabelSelector) (string, error) {
 	log.Debugf("Calculating pod selector %#v", podSelector)
 
 	var calicoSelectors []string
@@ -90,7 +90,7 @@ func (p *policyConverter) calculatePodSelectors(podSelector k8sMetaV1.LabelSelec
 	return calicoSelectorsStr, nil
 }
 
-func calculateSelectors(labelSelector k8sMetaV1.LabelSelector, keyformat string) ([]string, error) {
+func calculateSelectors(labelSelector metav1.LabelSelector, keyformat string) ([]string, error) {
 	var calicoSelectors []string
 	for key, value := range labelSelector.MatchLabels {
 		modifiedKey := fmt.Sprintf(keyformat, key)
@@ -108,13 +108,13 @@ func calculateSelectors(labelSelector k8sMetaV1.LabelSelector, keyformat string)
 		valuesList := strings.Join(quotedValues, ",")
 
 		switch operator {
-		case k8sMetaV1.LabelSelectorOpIn:
+		case metav1.LabelSelectorOpIn:
 			calicoSelectors = append(calicoSelectors, fmt.Sprintf("%s in { %s }", key, valuesList))
-		case k8sMetaV1.LabelSelectorOpNotIn:
+		case metav1.LabelSelectorOpNotIn:
 			calicoSelectors = append(calicoSelectors, fmt.Sprintf("%s not in { %s }", key, valuesList))
-		case k8sMetaV1.LabelSelectorOpExists:
+		case metav1.LabelSelectorOpExists:
 			calicoSelectors = append(calicoSelectors, fmt.Sprintf("has(%s)", key))
-		case k8sMetaV1.LabelSelectorOpDoesNotExist:
+		case metav1.LabelSelectorOpDoesNotExist:
 			calicoSelectors = append(calicoSelectors, fmt.Sprintf("! has(%s)", key))
 		default:
 			return nil, fmt.Errorf("Unknown operator: %s", operator)
@@ -161,7 +161,7 @@ func (p *policyConverter) calculateInboundRules() ([]api.Rule, error) {
 
 // Takes a single "allowIncoming" rule from a NetworkPolicy object
 // and returns a list of Calico Rule object with implement it.
-func (p *policyConverter) allowIncomingToRules(ingressRule k8sNetV1.NetworkPolicyIngressRule) ([]api.Rule, error) {
+func (p *policyConverter) allowIncomingToRules(ingressRule netv1.NetworkPolicyIngressRule) ([]api.Rule, error) {
 	log.Debug("Processing ingress rule: %s", ingressRule)
 
 	var toArgs map[string]api.EntityRule
@@ -176,7 +176,7 @@ func (p *policyConverter) allowIncomingToRules(ingressRule k8sNetV1.NetworkPolic
 		}
 	} else {
 		log.Debug("No ports specified, allow all protocols / ports")
-		toArgs[string(k8sApiV1.ProtocolTCP)] = api.EntityRule{}
+		toArgs[string(v1.ProtocolTCP)] = api.EntityRule{}
 	}
 
 	// Generate "from" arguments for this Rule.
@@ -215,7 +215,7 @@ func (p *policyConverter) allowIncomingToRules(ingressRule k8sNetV1.NetworkPolic
 
 // Generates an arguments dictionary suitable for passing to
 // the constructor of a libcalico Rule object from the given ports.
-func (p *policyConverter) generateToArgs(ports []k8sNetV1.NetworkPolicyPort) (map[string]api.EntityRule, error) {
+func (p *policyConverter) generateToArgs(ports []netv1.NetworkPolicyPort) (map[string]api.EntityRule, error) {
 	// Keep a map of ports exposed, keyed by protocol.
 	portsByProtocol := make(map[string][]numorstring.Port)
 
@@ -226,7 +226,7 @@ func (p *policyConverter) generateToArgs(ports []k8sNetV1.NetworkPolicyPort) (ma
 		if toPort.Protocol != nil {
 			protocol = strings.ToLower(string(*toPort.Protocol))
 		} else {
-			protocol = strings.ToLower(string(k8sApiV1.ProtocolTCP))
+			protocol = strings.ToLower(string(v1.ProtocolTCP))
 		}
 
 		//set, portList := setDefault(portsByProtocol, protocol, make([]numorstring.Port, 0))
@@ -265,7 +265,7 @@ func setDefault(h map[string][]numorstring.Port, key string, value []numorstring
 // Generate an arguments dictionary suitable for passing to
 // the constructor of a libcalico Rule object using the given
 // "from" clauses.
-func (p *policyConverter) generateFromArgs(froms []k8sNetV1.NetworkPolicyPeer) ([]api.EntityRule, error) {
+func (p *policyConverter) generateFromArgs(froms []netv1.NetworkPolicyPeer) ([]api.EntityRule, error) {
 	fromArgs := make([]api.EntityRule, 0)
 	for _, fromClause := range froms {
 
@@ -340,9 +340,9 @@ func (p *policyConverter) generateFromArgs(froms []k8sNetV1.NetworkPolicyPeer) (
 // GetKey returns name of network policy as key
 func (p *policyConverter) GetKey(obj interface{}) string {
 
-	if reflect.TypeOf(obj) != reflect.TypeOf(api.Policy{}) {
-		log.Fatalf("can not construct key for object %#v. Object is not of type api.Policy", obj)
-	}
+	//if reflect.TypeOf(obj) != reflect.TypeOf(netv1.NetworkPolicy{}) {
+	//	log.Fatalf("can not construct key for object %#v. Object is not of type netv1.NetworkPolicy", obj)
+	//}
 	policy := obj.(api.Policy)
 	return policy.Metadata.Name
 }
