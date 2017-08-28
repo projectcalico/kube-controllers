@@ -12,7 +12,7 @@ import (
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	k8sNetV1 "k8s.io/client-go/pkg/apis/networking/v1"
+	netv1 "k8s.io/client-go/pkg/apis/networking/v1"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
 	"time"
@@ -57,17 +57,17 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 
 	cacheArgs := calicocache.ResourceCacheArgs{
 		ListFunc:   listFunc,
-		ObjectType: reflect.TypeOf(api.Profile{}),
+		ObjectType: reflect.TypeOf(api.Policy{}),
 	}
 
 	ccache := calicocache.NewResourceCache(cacheArgs)
 
 	// create the watcher
-	listWatcher := cache.NewListWatchFromClient(k8sClientset.ExtensionsV1beta1().RESTClient(), "networkpolicies", "", fields.Everything())
+	listWatcher := cache.NewListWatchFromClient(k8sClientset.NetworkingV1().RESTClient(), "networkpolicies", "", fields.Everything())
 
 	// Bind the calico cache to kubernetes cache with the help of an informer. This way we make sure that
 	// whenever the kubernetes cache is updated, changes get reflected in calico cache as well.
-	indexer, informer := cache.NewIndexerInformer(listWatcher, &k8sNetV1.NetworkPolicy{}, 0, cache.ResourceEventHandlerFuncs{
+	indexer, informer := cache.NewIndexerInformer(listWatcher, &netv1.NetworkPolicy{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			log.Debugf("Got ADD event for network policy: %#v\n", obj)
 
@@ -193,10 +193,13 @@ func (c *PolicyController) syncToCalico(key string) error {
 
 		// Let Delete() operation be idompotent. Ignore the error while deletion if
 		// object does not exists on datastore already.
-		if _, ok := err.(errors.ErrorResourceDoesNotExist); ok {
-			err = nil
+		if err != nil {
+			if _, ok := err.(errors.ErrorResourceDoesNotExist); !ok {
+				log.WithError(err).Errorf("Got error while deleting %s in datastore.", key)
+				return err
+			}
 		}
-		return err
+		return nil
 	}else{
 		var p api.Policy
 		p = obj.(api.Policy)
