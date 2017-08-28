@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"reflect"
 	"time"
+	"strings"
 )
 
 // PolicyController Implements Controller interface
@@ -48,7 +49,9 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 		// Filter out only objects that are written by policy controller
 		for _, policy := range calicoPolicies.Items {
 			policyName := policyConverter.GetKey(policy)
-			npMap[policyName] = policy
+			if strings.Contains(policyName, ".") {
+				npMap[policyName] = policy
+			}	
 		}
 
 		log.Debugf("Found %d policies in calico datastore:", len(npMap))
