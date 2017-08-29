@@ -14,11 +14,11 @@ import (
 )
 
 type policyConverter struct {
-	k8sPolicy netv1.NetworkPolicy
+	k8sPolicy *netv1.NetworkPolicy
 }
 
 // Format used by calico for selectors by calico
-const calicoSelectorFormat = "%s == %s"
+const calicoSelectorFormat = "%s == '%s'"
 
 // Format to use for labels inherited from a namespace.
 const namespaceLabelKeyFormat = "k8s_ns/label/%s"
@@ -36,16 +36,16 @@ func (p *policyConverter) Convert(k8sObj interface{}) (interface{}, error) {
 	//	log.Fatalf("can not convert object %#v to calico profile. Object is not of type *netv1.NetworkPolicy", k8sObj)
 	//}
 
-	p.k8sPolicy = k8sObj.(netv1.NetworkPolicy)
+	p.k8sPolicy = k8sObj.(*netv1.NetworkPolicy)
 
 	calicoPolicy := api.NewPolicy()
 
-	name := fmt.Sprintf("%s/%s", p.k8sPolicy.ObjectMeta.Namespace, p.k8sPolicy.ObjectMeta.Name)
+	name := fmt.Sprintf("%s.%s", p.k8sPolicy.ObjectMeta.Namespace, p.k8sPolicy.ObjectMeta.Name)
 
 	metadata := api.PolicyMetadata{
 		Name: name,
 	}
-
+	
 	polOrder := netPolOrder
 	selectors, err := p.calculatePodSelectors(p.k8sPolicy.Spec.PodSelector)
 	if err != nil {
@@ -65,7 +65,6 @@ func (p *policyConverter) Convert(k8sObj interface{}) (interface{}, error) {
 	calicoPolicy.Spec.Selector = selectors
 	calicoPolicy.Spec.IngressRules = rules
 	calicoPolicy.Spec.EgressRules = egressRules
-
 	return *calicoPolicy, nil
 }
 
@@ -164,7 +163,7 @@ func (p *policyConverter) calculateInboundRules() ([]api.Rule, error) {
 func (p *policyConverter) allowIncomingToRules(ingressRule netv1.NetworkPolicyIngressRule) ([]api.Rule, error) {
 	log.Debug("Processing ingress rule: %s", ingressRule)
 
-	var toArgs map[string]api.EntityRule
+	toArgs := make(map[string]api.EntityRule)
 	var err error
 	// Generate to "to" arguments for this Rule.
 	ports := ingressRule.Ports
@@ -176,7 +175,7 @@ func (p *policyConverter) allowIncomingToRules(ingressRule netv1.NetworkPolicyIn
 		}
 	} else {
 		log.Debug("No ports specified, allow all protocols / ports")
-		toArgs[string(v1.ProtocolTCP)] = api.EntityRule{}
+		toArgs[strings.ToLower(string(v1.ProtocolTCP))] = api.EntityRule{}
 	}
 
 	// Generate "from" arguments for this Rule.
@@ -184,7 +183,7 @@ func (p *policyConverter) allowIncomingToRules(ingressRule netv1.NetworkPolicyIn
 	froms := ingressRule.From
 	if len(froms) > 0 {
 		log.Debug("Parsing 'from': %s", froms)
-		fromArgs, err = p.generateFromArgs(froms)
+		fromArgs, err = p.generateFromArgs(froms)  
 
 		if err != nil {
 			return nil, err
