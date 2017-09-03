@@ -12,11 +12,11 @@ import (
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	netv1 "k8s.io/client-go/pkg/apis/networking/v1"
+	"k8s.io/client-go/pkg/apis/extensions/v1beta1"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
-	"time"
 	"strings"
+	"time"
 )
 
 // PolicyController Implements Controller interface
@@ -49,9 +49,9 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 		// Filter out only objects that are written by policy controller
 		for _, policy := range calicoPolicies.Items {
 			policyName := policyConverter.GetKey(policy)
-			if strings.Contains(policyName, ".") {
+			if strings.Contains(policyName, "knp.default.") {
 				npMap[policyName] = policy
-			}	
+			}
 		}
 
 		log.Debugf("Found %d policies in calico datastore:", len(npMap))
@@ -66,11 +66,12 @@ func NewPolicyController(k8sClientset *kubernetes.Clientset, calicoClient *clien
 	ccache := calicocache.NewResourceCache(cacheArgs)
 
 	// create the watcher
-	listWatcher := cache.NewListWatchFromClient(k8sClientset.NetworkingV1().RESTClient(), "networkpolicies", "", fields.Everything())
+	listWatcher := cache.NewListWatchFromClient(k8sClientset.Extensions().RESTClient(), "networkpolicies", "", fields.Everything())
 
 	// Bind the calico cache to kubernetes cache with the help of an informer. This way we make sure that
 	// whenever the kubernetes cache is updated, changes get reflected in calico cache as well.
-	indexer, informer := cache.NewIndexerInformer(listWatcher, &netv1.NetworkPolicy{}, 0, cache.ResourceEventHandlerFuncs{
+
+	indexer, informer := cache.NewIndexerInformer(listWatcher, &v1beta1.NetworkPolicy{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			log.Debugf("Got ADD event for network policy: %#v\n", obj)
 
@@ -203,7 +204,7 @@ func (c *PolicyController) syncToCalico(key string) error {
 			}
 		}
 		return nil
-	}else{
+	} else {
 		var p api.Policy
 		p = obj.(api.Policy)
 		log.Infof("Applying network policy %s on datastore \n", key)
