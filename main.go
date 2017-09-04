@@ -5,38 +5,28 @@ import (
 	"github.com/projectcalico/k8s-policy/pkg/controllers/namespace"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/pod"
 	"github.com/projectcalico/k8s-policy/pkg/controllers/networkpolicy"
+	"github.com/projectcalico/k8s-policy/pkg/config"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/tools/clientcmd"
-	"os"
 )
 
 func main() {
-	logLevel, err := log.ParseLevel(os.Getenv("LOG_LEVEL"))
+	
+	config := new(config.Config)
+	err := config.Parse()
 	if err != nil {
-
-		// Defaulting log level to INFO
+		panic(err.Error())
+	}
+	logLevel, err := log.ParseLevel(config.LogLevel)
+	if(err!=nil){
 		logLevel = log.InfoLevel
 	}
-
 	log.SetLevel(logLevel)
 
-	reconcilerPeriod, exists := os.LookupEnv("RECONCILER_PERIOD")
-	if !exists {
-		
-		// Defaulting to 5 mins
-		reconcilerPeriod = "5m"
-	}
-
-	controllerType, exists := os.LookupEnv("CONTROLLER_TYPE")
-	if !exists {
-		log.Fatal("Specify controller type using environment variable CONTROLLER_TYPE. Valid values are endpoint, profile, policy.")
-	}
-
 	k8sClientset, calicoClient, err := getClients()
-
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -44,16 +34,17 @@ func main() {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	switch controllerType {
+	//TODO: Allow user define multiple types of controllers.
+	switch config.ControllerType {
 	case "endpoint":
 		podController := pod.NewPodController(k8sClientset, calicoClient)
-		go podController.Run(5, reconcilerPeriod, stop)
+		go podController.Run(config.EndpointWorkers, config.ReconcilerPeriod, stop)
 	case "profile":
 		namespaceController := namespace.NewNamespaceController(k8sClientset, calicoClient)
-		go namespaceController.Run(5, reconcilerPeriod, stop)
+		go namespaceController.Run(config.ProfileWorkers, config.ReconcilerPeriod, stop)
 	case "policy":
 	    policyController := networkpolicy.NewPolicyController(k8sClientset, calicoClient)
-		go policyController.Run(5, reconcilerPeriod, stop)
+		go policyController.Run(config.PolicyWorkers, config.ReconcilerPeriod, stop)
 	default:
 		log.Fatal("Not a valid CONTROLLER_TYPE. Valid values are endpoint, profile, policy.")
 	}
