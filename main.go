@@ -2,10 +2,10 @@ package main
 
 import (
 	"flag"
-	"github.com/projectcalico/k8s-policy/pkg/controllers/namespace"
-	"github.com/projectcalico/k8s-policy/pkg/controllers/pod"
-	"github.com/projectcalico/k8s-policy/pkg/controllers/networkpolicy"
 	"github.com/projectcalico/k8s-policy/pkg/config"
+	"github.com/projectcalico/k8s-policy/pkg/controllers/namespace"
+	"github.com/projectcalico/k8s-policy/pkg/controllers/networkpolicy"
+	"github.com/projectcalico/k8s-policy/pkg/controllers/pod"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
@@ -14,21 +14,21 @@ import (
 )
 
 func main() {
-	
+
 	config := new(config.Config)
 	err := config.Parse()
 	if err != nil {
-		panic(err.Error())
+		log.WithError(err).Fatal("Failed to parse config")
 	}
 	logLevel, err := log.ParseLevel(config.LogLevel)
-	if(err!=nil){
+	if err != nil {
 		logLevel = log.InfoLevel
 	}
 	log.SetLevel(logLevel)
 
 	k8sClientset, calicoClient, err := getClients()
 	if err != nil {
-		log.Fatal(err)
+		log.WithError(err).Fatal("Failed to get clientset.")
 	}
 
 	stop := make(chan struct{})
@@ -43,7 +43,7 @@ func main() {
 		namespaceController := namespace.NewNamespaceController(k8sClientset, calicoClient)
 		go namespaceController.Run(config.ProfileWorkers, config.ReconcilerPeriod, stop)
 	case "policy":
-	    policyController := networkpolicy.NewPolicyController(k8sClientset, calicoClient)
+		policyController := networkpolicy.NewPolicyController(k8sClientset, calicoClient)
 		go policyController.Run(config.PolicyWorkers, config.ReconcilerPeriod, stop)
 	default:
 		log.Fatal("Not a valid CONTROLLER_TYPE. Valid values are endpoint, profile, policy.")

@@ -19,7 +19,7 @@ func NewPolicyConverter() Converter {
 
 func (p *policyConverter) Convert(k8sObj interface{}) (interface{}, error) {
 	if reflect.TypeOf(k8sObj) != reflect.TypeOf(&v1beta1.NetworkPolicy{}) {
-		log.Fatalf("can not convert object %#v to calico profile. Object is not of type *v1beta1.NetworkPolicy", k8sObj)
+		log.Fatalf("can not convert object %#v to calico policy. Object is not of type *v1beta1.NetworkPolicy", k8sObj)
 	}
 
 	np := k8sObj.(*v1beta1.NetworkPolicy)
