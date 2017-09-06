@@ -20,6 +20,7 @@ func main() {
 	if err != nil {
 		log.WithError(err).Fatal("Failed to parse config")
 	}
+
 	logLevel, err := log.ParseLevel(config.LogLevel)
 	if err != nil {
 		logLevel = log.InfoLevel
@@ -34,7 +35,7 @@ func main() {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	//TODO: Allow user define multiple types of controllers.
+	// TODO: Allow user define multiple types of controllers.
 	switch config.ControllerType {
 	case "endpoint":
 		podController := pod.NewPodController(k8sClientset, calicoClient)
@@ -53,8 +54,9 @@ func main() {
 	select {}
 }
 
-// Fuction that returns kubernetes and calico clients.
-func getClients() (*kubernetes.Clientset, *client.Client, error) {
+// getClients builds and returns both Kubernetes and Calico clients.
+func getClients(config config.Config) (*kubernetes.Clientset, *client.Client, error) {
+	// First, build the Calico client.
 	cconfig, err := client.LoadClientConfig("")
 	if err != nil {
 		return nil, nil, err
@@ -63,29 +65,50 @@ func getClients() (*kubernetes.Clientset, *client.Client, error) {
 	// Get Calico client
 	calicoClient, err := client.New(*cconfig)
 	if err != nil {
-		panic(err)
+		return nil, nil, fmt.Errorf("failed to build Calico client: %s", err)
 	}
 
-	var kubeconfig string
-	var master string
-
-	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
-	flag.StringVar(&master, "master", "", "master url")
-	flag.Parse()
-
-	// creates the connection
-	k8sconfig, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
-	if err != nil {
-		log.Fatal(err)
+	// Now build the Kubernetes client.
+	configOverrides := &clientcmd.ConfigOverrides{}
+	var overridesMap = []struct {
+		variable *string
+		value    string
+	}{
+	//		{&configOverrides.ClusterInfo.Server, config.K8sAPIEndpoint},
+	//		{&configOverrides.AuthInfo.ClientCertificate, config.K8sCertFile},
+	//		{&configOverrides.AuthInfo.ClientKey, config.K8sKeyFile},
+	//		{&configOverrides.ClusterInfo.CertificateAuthority, config.K8sCAFile},
+	//		{&configOverrides.AuthInfo.Token, config.K8sAPIToken},
 	}
+
+	// Set an explicit path to the kubeconfig if one
+	// was provided.
+	loadingRules := clientcmd.ClientConfigLoadingRules{}
+	// if config.Kubeconfig != "" {
+	// 	loadingRules.ExplicitPath = config.Kubeconfig
+	// }
+
+	// Using the override map above, populate any non-empty values.
+	for _, override := range overridesMap {
+		if override.value != "" {
+			*override.variable = override.value
+		}
+	}
+	// if config.K8sInsecureSkipTLSVerify {
+	// 	configOverrides.ClusterInfo.InsecureSkipTLSVerify = true
+	// }
+	log.Debugf("Config overrides: %+v", configOverrides)
+
+	// Build the config for the Kubernetes client.
+	k8sconfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(&loadingRules, configOverrides).ClientConfig()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to build kubernetes client config: %s", err)
 	}
 
 	// Get kubenetes clientset
 	k8sClientset, err := kubernetes.NewForConfig(k8sconfig)
 	if err != nil {
-		panic(err.Error())
+		return nil, nil, fmt.Errorf("failed to build kubernetes client: %s", err)
 	}
 
 	return k8sClientset, calicoClient, nil
