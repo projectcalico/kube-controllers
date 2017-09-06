@@ -60,7 +60,6 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 
 	cacheArgs := calicocache.ResourceCacheArgs{
 		ListFunc:   listFunc,
-		Client:     calicoClient,
 		ObjectType: reflect.TypeOf(api.Profile{}), // Restrict cache to store calico profiles only.
 	}
 
@@ -119,7 +118,7 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 			}
 
 			calicoKey := namespaceConverter.GetKey(profile)
-			
+
 			// Add key:profile in calicoCache
 			ccache.Set(calicoKey, profile)
 		},
@@ -139,7 +138,7 @@ func NewNamespaceController(k8sClientset *kubernetes.Clientset, calicoClient *cl
 				log.WithError(err).Errorf("Error while converting %#v to calico profile.", obj)
 				return
 			}
-			
+
 			calicoKey := namespaceConverter.GetKey(profile)
 			ccache.Delete(calicoKey)
 		},
@@ -226,7 +225,7 @@ func (c *NamespaceController) syncToCalico(key string) error {
 		}
 
 		return err
-	}else{
+	} else {
 
 		var p api.Profile
 		p = obj.(api.Profile)
@@ -251,7 +250,7 @@ func (c *NamespaceController) handleErr(err error, key string) {
 
 	// This controller retries 5 times if something goes wrong. After that, it stops trying.
 	if workqueue.NumRequeues(key) < 5 {
-		
+
 		log.WithError(err).Errorf("Error syncing namespace %v: %v", key, err)
 		// Re-enqueue the key rate limited. Based on the rate limiter on the
 		// queue and the re-enqueue history, the key will be processed later again.
@@ -260,7 +259,7 @@ func (c *NamespaceController) handleErr(err error, key string) {
 	}
 
 	workqueue.Forget(key)
-	
+
 	// Report to an external entity that, even after several retries, we could not successfully process this key
 	uruntime.HandleError(err)
 	log.WithError(err).Errorf("Dropping namespace %q out of the queue: %v", key, err)
