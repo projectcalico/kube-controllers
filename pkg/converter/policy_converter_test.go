@@ -15,7 +15,7 @@ var _ = Describe("PolicyConverter", func() {
 
 	npConverter := NewPolicyConverter()
 
-	It("should parse a basic NetworkPolicy to a Policy", func() {
+	Context("basic NetworkPolicy", func() {
 		port80 := intstr.FromInt(80)
 		np := extensions.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
@@ -51,31 +51,47 @@ var _ = Describe("PolicyConverter", func() {
 
 		// Parse the policy.
 		pol, err := npConverter.Convert(&np)
-		Expect(err).NotTo(HaveOccurred())
+		It("should not generate a conversion error", func() {
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-		// Assert key fields are correct.
-		Expect(pol.(api.Policy).Metadata.Name).To(Equal("knp.default.default.testPolicy"))
+		// Assert policy name.
+		It("should return calico policy with expected name", func() {
+			Expect(pol.(api.Policy).Metadata.Name).To(Equal("knp.default.default.testPolicy"))
+		})
 
-		// Assert value fields are correct.
-		Expect(int(*pol.(api.Policy).Spec.Order)).To(Equal(1000))
+		// Assert policy order.
+		It("should return calico policy with correct order", func() {
+			Expect(int(*pol.(api.Policy).Spec.Order)).To(Equal(1000))
+		})
+
 		// Check the selector is correct, and that the matches are sorted.
-		Expect(pol.(api.Policy).Spec.Selector).To(Equal(
-			"calico/k8s_ns == 'default' && label == 'value' && label2 == 'value2'"))
+		It("should return calico policy with correct selector", func() {
+			Expect(pol.(api.Policy).Spec.Selector).To(Equal(
+				"calico/k8s_ns == 'default' && label == 'value' && label2 == 'value2'"))
+		})
+
 		protoTCP := numorstring.ProtocolFromString("tcp")
-		Expect(pol.(api.Policy).Spec.IngressRules).To(ConsistOf(api.Rule{
-			Action:      "allow",
-			Protocol:    &protoTCP, // Defaulted to TCP.
-			Source:      api.EntityRule{Selector: "calico/k8s_ns == 'default' && k == 'v' && k2 == 'v2'"},
-			Destination: api.EntityRule{Ports: []numorstring.Port{numorstring.SinglePort(80)}},
-		}))
+		It("should return calico policy with correct ingress rules", func() {
+			Expect(pol.(api.Policy).Spec.IngressRules).To(ConsistOf(api.Rule{
+				Action:      "allow",
+				Protocol:    &protoTCP, // Defaulted to TCP.
+				Source:      api.EntityRule{Selector: "calico/k8s_ns == 'default' && k == 'v' && k2 == 'v2'"},
+				Destination: api.EntityRule{Ports: []numorstring.Port{numorstring.SinglePort(80)}},
+			}))
+		})
 
 		// There should be no OutboundRules
-		Expect(len(pol.(api.Policy).Spec.EgressRules)).To(Equal(0))
+		It("should return calico policy with no egress rules", func() {
+			Expect(len(pol.(api.Policy).Spec.EgressRules)).To(Equal(0))
+		})
 
 		// Check that Types field exists and has only 'ingress'
-		Expect(len(pol.(api.Policy).Spec.Types)).To(Equal(1))
 		var policyType api.PolicyType = "ingress"
-		Expect(pol.(api.Policy).Spec.Types[0]).To(Equal(policyType))
+		It("should return calico policy with ingress type", func() {
+			Expect(len(pol.(api.Policy).Spec.Types)).To(Equal(1))
+			Expect(pol.(api.Policy).Spec.Types[0]).To(Equal(policyType))
+		})
 	})
 
 	It("should parse a NetworkPolicy with no rules", func() {
@@ -93,24 +109,42 @@ var _ = Describe("PolicyConverter", func() {
 
 		// Parse the policy.
 		pol, err := npConverter.Convert(&np)
-		Expect(err).NotTo(HaveOccurred())
+		It("should not generate a conversion error", func() {
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-		// Assert key fields are correct.
-		Expect(pol.(api.Policy).Metadata.Name).To(Equal("knp.default.default.testPolicy"))
+		// Assert policy name.
+		It("should return calico policy with expected name", func() {
+			Expect(pol.(api.Policy).Metadata.Name).To(Equal("knp.default.default.testPolicy"))
+		})
 
-		// Assert value fields are correct.
-		Expect(int(*pol.(api.Policy).Spec.Order)).To(Equal(1000))
-		Expect(pol.(api.Policy).Spec.Selector).To(Equal(
-			"calico/k8s_ns == 'default' && label == 'value'"))
-		Expect(len(pol.(api.Policy).Spec.IngressRules)).To(Equal(0))
+		// Assert policy order.
+		It("should return calico policy with correct order", func() {
+			Expect(int(*pol.(api.Policy).Spec.Order)).To(Equal(1000))
+		})
+
+		// Assert selectors
+		It("should return calico policy with correct selector", func() {
+			Expect(pol.(api.Policy).Spec.Selector).To(Equal(
+				"calico/k8s_ns == 'default' && label == 'value'"))
+		})
+
+		// There should be no inboundRules
+		It("should return calico policy with no ingress rules", func() {
+			Expect(len(pol.(api.Policy).Spec.IngressRules)).To(Equal(0))
+		})
 
 		// There should be no OutboundRules
-		Expect(len(pol.(api.Policy).Spec.EgressRules)).To(Equal(0))
+		It("should return calico policy with no egress rules", func() {
+			Expect(len(pol.(api.Policy).Spec.EgressRules)).To(Equal(0))
+		})
 
-		// Check that Types field exists and has only 'ingress'
-		Expect(len(pol.(api.Policy).Spec.Types)).To(Equal(1))
 		var policyType api.PolicyType = "ingress"
-		Expect(pol.(api.Policy).Spec.Types[0]).To(Equal(policyType))
+		// Check that Types field exists and has only 'ingress'
+		It("should return calico policy with ingress type", func() {
+			Expect(len(pol.(api.Policy).Spec.Types)).To(Equal(1))
+			Expect(pol.(api.Policy).Spec.Types[0]).To(Equal(policyType))
+		})
 	})
 
 	It("should parse a NetworkPolicy with empty podSelector", func() {
@@ -126,23 +160,41 @@ var _ = Describe("PolicyConverter", func() {
 
 		// Parse the policy.
 		pol, err := npConverter.Convert(&np)
-		Expect(err).NotTo(HaveOccurred())
+		It("should not generate a conversion error", func() {
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-		// Assert key fields are correct.
-		Expect(pol.(api.Policy).Metadata.Name).To(Equal("knp.default.default.testPolicy"))
+		// Assert policy name.
+		It("should return calico policy with expected name", func() {
+			Expect(pol.(api.Policy).Metadata.Name).To(Equal("knp.default.default.testPolicy"))
+		})
 
-		// Assert value fields are correct.
-		Expect(int(*pol.(api.Policy).Spec.Order)).To(Equal(1000))
-		Expect(pol.(api.Policy).Spec.Selector).To(Equal("calico/k8s_ns == 'default'"))
-		Expect(len(pol.(api.Policy).Spec.IngressRules)).To(Equal(0))
+		// Assert policy order.
+		It("should return calico policy with correct order", func() {
+			Expect(int(*pol.(api.Policy).Spec.Order)).To(Equal(1000))
+		})
+
+		// Assert selectors
+		It("should return calico policy with correct selector", func() {
+			Expect(pol.(api.Policy).Spec.Selector).To(Equal("calico/k8s_ns == 'default'"))
+		})
+
+		// There should be no inboundRules
+		It("should return calico policy with no ingress rules", func() {
+			Expect(len(pol.(api.Policy).Spec.IngressRules)).To(Equal(0))
+		})
 
 		// There should be no OutboundRules
-		Expect(len(pol.(api.Policy).Spec.EgressRules)).To(Equal(0))
+		It("should return calico policy with no egress rules", func() {
+			Expect(len(pol.(api.Policy).Spec.EgressRules)).To(Equal(0))
+		})
 
-		// Check that Types field exists and has only 'ingress'
-		Expect(len(pol.(api.Policy).Spec.Types)).To(Equal(1))
 		var policyType api.PolicyType = "ingress"
-		Expect(pol.(api.Policy).Spec.Types[0]).To(Equal(policyType))
+		// Check that Types field exists and has only 'ingress'
+		It("should return calico policy with ingress type", func() {
+			Expect(len(pol.(api.Policy).Spec.Types)).To(Equal(1))
+			Expect(pol.(api.Policy).Spec.Types[0]).To(Equal(policyType))
+		})
 	})
 
 	It("should parse a NetworkPolicy with an empty namespaceSelector", func() {
@@ -171,24 +223,42 @@ var _ = Describe("PolicyConverter", func() {
 
 		// Parse the policy.
 		pol, err := npConverter.Convert(&np)
-		Expect(err).NotTo(HaveOccurred())
+		It("should not generate a conversion error", func() {
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-		// Assert key fields are correct.
-		Expect(pol.(api.Policy).Metadata.Name).To(Equal("knp.default.default.testPolicy"))
+		// Assert policy name.
+		It("should return calico policy with expected name", func() {
+			Expect(pol.(api.Policy).Metadata.Name).To(Equal("knp.default.default.testPolicy"))
+		})
 
-		// Assert value fields are correct.
-		Expect(int(*pol.(api.Policy).Spec.Order)).To(Equal(1000))
-		Expect(pol.(api.Policy).Spec.Selector).To(Equal(
-			"calico/k8s_ns == 'default' && label == 'value'"))
-		Expect(len(pol.(api.Policy).Spec.IngressRules)).To(Equal(1))
-		Expect(pol.(api.Policy).Spec.IngressRules[0].Source.Selector).To(Equal("has(calico/k8s_ns)"))
+		// Assert policy order.
+		It("should return calico policy with correct order", func() {
+			Expect(int(*pol.(api.Policy).Spec.Order)).To(Equal(1000))
+		})
+
+		// Assert selectors
+		It("should return calico policy with correct selector", func() {
+			Expect(pol.(api.Policy).Spec.Selector).To(Equal(
+				"calico/k8s_ns == 'default' && label == 'value'"))
+		})
+
+		// Assert ingress rules
+		It("should return calico policy with ingress rules", func() {
+			Expect(len(pol.(api.Policy).Spec.IngressRules)).To(Equal(1))
+			Expect(pol.(api.Policy).Spec.IngressRules[0].Source.Selector).To(Equal("has(calico/k8s_ns)"))
+		})
 
 		// There should be no OutboundRules
-		Expect(len(pol.(api.Policy).Spec.EgressRules)).To(Equal(0))
+		It("should return calico policy with no egress rules", func() {
+			Expect(len(pol.(api.Policy).Spec.EgressRules)).To(Equal(0))
+		})
 
 		// Check that Types field exists and has only 'ingress'
-		Expect(len(pol.(api.Policy).Spec.Types)).To(Equal(1))
 		var policyType api.PolicyType = "ingress"
-		Expect(pol.(api.Policy).Spec.Types[0]).To(Equal(policyType))
+		It("should return calico policy with ingress type", func() {
+			Expect(len(pol.(api.Policy).Spec.Types)).To(Equal(1))
+			Expect(pol.(api.Policy).Spec.Types[0]).To(Equal(policyType))
+		})
 	})
 })

@@ -12,7 +12,7 @@ var _ = Describe("PodConverter", func() {
 
 	wepConverter := NewPodConverter()
 
-	It("should parse a Pod with no labels", func() {
+	Context("Pod with no labels", func() {
 		pod := k8sapi.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "podA",
@@ -24,16 +24,22 @@ var _ = Describe("PodConverter", func() {
 		}
 
 		wep, err := wepConverter.Convert(&pod)
-		Expect(err).NotTo(HaveOccurred())
+		It("should not generate a conversion error", func() {
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-		// Assert key fields.
-		Expect(wep.(api.WorkloadEndpoint).Metadata.Workload).To(Equal("default.podA"))
+		// Assert workloadID.
+		It("should return workloadendpoint with correct workloadID", func() {
+			Expect(wep.(api.WorkloadEndpoint).Metadata.Workload).To(Equal("default.podA"))
+		})
 
-		// Assert value fields.
-		Expect(wep.(api.WorkloadEndpoint).Metadata.Labels).To(Equal(map[string]string{"calico/k8s_ns": "default"}))
+		// Assert labels.
+		It("should return workloadendpoint with namespace label", func() {
+			Expect(wep.(api.WorkloadEndpoint).Metadata.Labels).To(Equal(map[string]string{"calico/k8s_ns": "default"}))
+		})
 	})
 
-	It("should parse a Pod with labels", func() {
+	Context("Pod with labels", func() {
 		pod := k8sapi.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "podA",
@@ -49,17 +55,24 @@ var _ = Describe("PodConverter", func() {
 		}
 
 		wep, err := wepConverter.Convert(&pod)
-		Expect(err).NotTo(HaveOccurred())
+		It("should not generate a conversion error", func() {
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-		// Assert key fields.
-		Expect(wep.(api.WorkloadEndpoint).Metadata.Workload).To(Equal("default.podA"))
+		// Assert workloadID.
+		It("should return workloadendpoint with correct workloadID", func() {
+			Expect(wep.(api.WorkloadEndpoint).Metadata.Workload).To(Equal("default.podA"))
+		})
 
-		// Assert value fields.
+		// Assert labels.
 		var labels = map[string]string{
 			"foo":           "bar",
 			"roger":         "rabbit",
 			"calico/k8s_ns": "default",
 		}
-		Expect(wep.(api.WorkloadEndpoint).Metadata.Labels).To(Equal(labels))
+
+		It("should return workloadendpoint with correct labels", func() {
+			Expect(wep.(api.WorkloadEndpoint).Metadata.Labels).To(Equal(labels))
+		})
 	})
 })
