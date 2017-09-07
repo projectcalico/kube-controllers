@@ -45,7 +45,10 @@ vendor: glide.yaml
 		$(CALICO_BUILD) \
 		/bin/sh -c 'cd /go/src/$(PACKAGE_NAME) && glide install -strip-vendor'
 
-## Build the controller binary outside of a container.
+ut: vendor
+	./run-uts
+
+# Build the controller binary.
 binary: vendor
 	# Don't try to "install" the intermediate build files (.a .o) when not on linux
 	# since there are no write permissions for them in our linux build container.
@@ -69,11 +72,11 @@ binary-containerized: vendor
 	    make OS=$(OS) ARCH=$(ARCH) binary'
 
 ###############################################################################
-# Test targets 
+# Test tarets 
 ###############################################################################
 
 ## Runs all tests - good for CI. 
-ci: clean docker-image st # TODO: ut
+ci: clean docker-image ut st 
 
 GET_CONTAINER_IP := docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
 K8S_VERSION=1.7.4
