@@ -1,4 +1,4 @@
-package converter_test
+package converter
 
 import (
 	. "github.com/onsi/ginkgo"

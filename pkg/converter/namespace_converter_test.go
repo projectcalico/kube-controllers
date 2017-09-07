@@ -1,9 +1,8 @@
-package converter_test
+package converter
 
 import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/projectcalico/k8s-policy/pkg/converter"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sapi "k8s.io/client-go/pkg/api/v1"
@@ -19,7 +18,7 @@ var _ = Describe("NamespaceConverter", func() {
 			Status:     k8sapi.NamespaceStatus{},
 		}
 
-		nsConverter := converter.NewNamespaceConverter()
+		nsConverter := NewNamespaceConverter()
 		policyObject, err := nsConverter.Convert(&ns)
 
 		expectedType := reflect.TypeOf(*api.NewProfile())
@@ -39,7 +38,7 @@ var _ = Describe("NamespaceConverter", func() {
 			Status:     k8sapi.NamespaceStatus{},
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}
-		nsConverter := converter.NewNamespaceConverter()
+		nsConverter := NewNamespaceConverter()
 		p, err := nsConverter.Convert(&ns)
 
 		expectedName := "ns.projectcalico.org/" + namespace
@@ -52,7 +51,7 @@ var _ = Describe("NamespaceConverter", func() {
 	})
 
 	Context("With valid namespace object", func() {
-		nsConverter := converter.NewNamespaceConverter()
+		nsConverter := NewNamespaceConverter()
 
 		It("should parse a Namespace to a Profile", func() {
 			ns := k8sapi.Namespace{

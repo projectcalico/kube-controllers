@@ -1,9 +1,8 @@
-package converter_test
+package converter
 
 import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/projectcalico/k8s-policy/pkg/converter"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sapi "k8s.io/client-go/pkg/api/v1"
@@ -11,7 +10,7 @@ import (
 
 var _ = Describe("PodConverter", func() {
 
-	wepConverter := converter.NewPodConverter()
+	wepConverter := NewPodConverter()
 
 	It("should parse a Pod with no labels", func() {
 		pod := k8sapi.Pod{
