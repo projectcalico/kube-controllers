@@ -43,7 +43,7 @@ func main() {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	for _, controllerType := range strings.Split(config.ControllerType, ",") {
+	for _, controllerType := range strings.Split(config.EnabledControllers, ",") {
 		switch controllerType {
 		case "endpoint":
 			podController := pod.NewPodController(k8sClientset, calicoClient)
@@ -55,7 +55,7 @@ func main() {
 			policyController := networkpolicy.NewPolicyController(k8sClientset, calicoClient)
 			go policyController.Run(config.PolicyWorkers, config.ReconcilerPeriod, stop)
 		default:
-			log.Fatal("Not a valid CONTROLLER_TYPE. Valid values are endpoint, profile, policy.")
+			log.Fatalf("Invalid controller '%s' provided. Valid options are endpoint, profile, policy", controllerType)
 		}
 	}
 	
