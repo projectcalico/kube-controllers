@@ -30,7 +30,7 @@ func (p *podConverter) Convert(k8sObj interface{}) (interface{}, error) {
 	if pod.ObjectMeta.Labels != nil {
 		endpoint.Metadata.Labels = pod.ObjectMeta.Labels
 	} else {
-		endpoint.Metadata.Labels = make(map[string]string)
+		endpoint.Metadata.Labels = map[string]string{}
 	}
 
 	// Add a special label for the Kubernetes namespace.  This is used
