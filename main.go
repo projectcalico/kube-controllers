@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"github.com/projectcalico/k8s-policy/pkg/config"
-	"github.com/projectcalico/k8s-policy/pkg/controllers/namespace"
-	"github.com/projectcalico/k8s-policy/pkg/controllers/networkpolicy"
-	"github.com/projectcalico/k8s-policy/pkg/controllers/pod"
+	"github.com/projectcalico/k8s-policy/pkg/controllers"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
@@ -46,10 +44,10 @@ func main() {
 	for _, controllerType := range strings.Split(config.EnabledControllers, ",") {
 		switch controllerType {
 		case "endpoint":
-			podController := pod.NewPodController(k8sClientset, calicoClient)
+			podController := controllers.NewPodController(k8sClientset, calicoClient)
 			go podController.Run(config.EndpointWorkers, config.ReconcilerPeriod, stop)
 		case "profile":
-			namespaceController := namespace.NewNamespaceController(k8sClientset, calicoClient)
+			namespaceController := controllers.NewNamespaceController(k8sClientset, calicoClient)
 			go namespaceController.Run(config.ProfileWorkers, config.ReconcilerPeriod, stop)
 		case "policy":
 			policyController := networkpolicy.NewPolicyController(k8sClientset, calicoClient)
