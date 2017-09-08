@@ -95,7 +95,7 @@ var _ = Describe("PolicyConverter", func() {
 		})
 	})
 
-	It("should parse a NetworkPolicy with no rules", func() {
+	Context("should parse a NetworkPolicy with no rules", func() {
 		np := extensions.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "testPolicy",
@@ -148,7 +148,7 @@ var _ = Describe("PolicyConverter", func() {
 		})
 	})
 
-	It("should parse a NetworkPolicy with empty podSelector", func() {
+	Context("should parse a NetworkPolicy with empty podSelector", func() {
 		np := extensions.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "testPolicy",
@@ -198,7 +198,7 @@ var _ = Describe("PolicyConverter", func() {
 		})
 	})
 
-	It("should parse a NetworkPolicy with an empty namespaceSelector", func() {
+	Context("should parse a NetworkPolicy with an empty namespaceSelector", func() {
 		np := extensions.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "testPolicy",
@@ -260,6 +260,22 @@ var _ = Describe("PolicyConverter", func() {
 		It("should return calico policy with ingress type", func() {
 			Expect(len(pol.(api.Policy).Spec.Types)).To(Equal(1))
 			Expect(pol.(api.Policy).Spec.Types[0]).To(Equal(policyType))
+		})
+	})
+
+	Context("GetKey", func(){
+		policyName := "allow-all"
+		policy := api.Policy{
+			Metadata: api.PolicyMetadata{
+				Name: policyName,
+			},
+			Spec: api.PolicySpec{},
+		}
+
+		// Get key
+		key := npConverter.GetKey(policy)
+		It("should return name of policy as key", func(){
+			Expect(key).To(Equal(policyName))
 		})
 	})
 })

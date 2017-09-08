@@ -76,4 +76,21 @@ var _ = Describe("PodConverter", func() {
 			Expect(wep.(api.WorkloadEndpoint).Metadata.Labels).To(Equal(labels))
 		})
 	})
+
+	Context("GetKey", func(){
+		workloadID := "default.nginx"
+		wep := api.WorkloadEndpoint{
+			Metadata: api.WorkloadEndpointMetadata{
+				Name: "nginx",
+				Workload: workloadID,
+			},
+			Spec: api.WorkloadEndpointSpec{},
+		}
+
+		// Get key
+		key := wepConverter.GetKey(wep)
+		It("should return WorkloadID as key", func(){
+			Expect(key).To(Equal(workloadID))
+		})
+	})
 })

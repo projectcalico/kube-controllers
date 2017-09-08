@@ -96,4 +96,20 @@ var _ = Describe("NamespaceConverter", func() {
 			Expect(len(labels)).To(Equal(0))
 		})
 	})
+
+	Context("GetKey", func(){
+		profileName := "default"
+		profile := api.Profile{
+			Metadata: api.ProfileMetadata{
+				Name: profileName,
+			},
+			Spec: api.ProfileSpec{},
+		}
+
+		// Get key of profile
+		key := nsConverter.GetKey(profile)
+		It("should return name as key", func(){
+			Expect(key).To(Equal(profileName))
+		})	
+	})
 })
