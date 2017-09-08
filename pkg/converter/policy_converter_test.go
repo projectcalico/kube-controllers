@@ -1,6 +1,7 @@
-package converter
+package converter_test
 
 import (
+	"github.com/projectcalico/k8s-policy/pkg/converter"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,7 +14,7 @@ import (
 
 var _ = Describe("PolicyConverter", func() {
 
-	npConverter := NewPolicyConverter()
+	npConverter := converter.NewPolicyConverter()
 
 	Context("basic NetworkPolicy", func() {
 		port80 := intstr.FromInt(80)

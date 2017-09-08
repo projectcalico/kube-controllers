@@ -1,15 +1,16 @@
-package converter
+package converter_test
 
 import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/projectcalico/k8s-policy/pkg/converter"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sapi "k8s.io/client-go/pkg/api/v1"
 )
 
 var _ = Describe("NamespaceConverter", func() {
-	nsConverter := NewNamespaceConverter()
+	nsConverter := converter.NewNamespaceConverter()
 	Context("should parse a Namespace to a Profile", func() {
 		ns := k8sapi.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
