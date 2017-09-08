@@ -72,11 +72,20 @@ binary-containerized: vendor
 	    make OS=$(OS) ARCH=$(ARCH) binary'
 
 ###############################################################################
-# Test tarets 
+# Test targets 
 ###############################################################################
 
 ## Runs all tests - good for CI. 
-ci: clean docker-image ut st 
+ci: clean docker-image test-containerized st 
+
+## Run the tests in a container. Useful for CI, Mac dev.
+test-containerized: vendor run-etcd run-k8s-apiserver
+	-mkdir -p .go-pkg-cache
+	docker run --rm --privileged --net=host \
+		-e LOCAL_USER_ID=$(LOCAL_USER_ID) \
+		-v $(CURDIR)/.go-pkg-cache:/go/pkg/:rw \
+		-v $(CURDIR):/go/src/$(PACKAGE_NAME):rw \
+		$(CALICO_BUILD) sh -c 'cd /go/src/$(PACKAGE_NAME) && make WHAT=$(WHAT) SKIP=$(SKIP) ut'
 
 GET_CONTAINER_IP := docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
 K8S_VERSION=1.7.4
