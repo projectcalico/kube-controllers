@@ -1,12 +1,13 @@
 package cache
 
 import (
-	"github.com/patrickmn/go-cache"
-	log "github.com/sirupsen/logrus"
-	"k8s.io/client-go/util/workqueue"
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/patrickmn/go-cache"
+	log "github.com/sirupsen/logrus"
+	"k8s.io/client-go/util/workqueue"
 )
 
 // ResourceCache stores resources and queues updates when those resources
