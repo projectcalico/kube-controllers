@@ -2,17 +2,18 @@ package converter
 
 import (
 	"fmt"
+	"reflect"
+
 	"github.com/projectcalico/libcalico-go/lib/api"
 	log "github.com/sirupsen/logrus"
 	k8sApiV1 "k8s.io/client-go/pkg/api/v1"
-	"reflect"
 )
 
 // ProfileNameFormat Format used by policy controller to name Calico profiles
-const ProfileNameFormat = "ns.projectcalico.org/"
+const ProfileNameFormat = "k8s_ns."
 
 // profileLabelFormat Format used by policy controller to label Calico profiles
-const profileLabelFormat = "k8s_ns/label/"
+const profileLabelFormat = "pcns."
 
 type namespaceConverter struct {
 }
@@ -30,7 +31,7 @@ func (p *namespaceConverter) Convert(k8sObj interface{}) (interface{}, error) {
 	profile := api.NewProfile()
 
 	name := fmt.Sprintf(ProfileNameFormat+"%s", namespace.ObjectMeta.Name)
-	
+
 	// Generate the labels to apply to the profile, using a special prefix
 	// to indicate that these are the labels from the parent Kubernetes Namespace.
 	labels := map[string]string{}
@@ -49,7 +50,9 @@ func (p *namespaceConverter) Convert(k8sObj interface{}) (interface{}, error) {
 	return *profile, nil
 }
 
-// GetKey returns name of the namespace as key.
+// GetKey returns name of the Profile as its key.  For Profiles
+// backed by Kubernetes namespaces and managed by this controller, the name
+// is of format `k8s_ns.name`.
 func (p *namespaceConverter) GetKey(obj interface{}) string {
 
 	if reflect.TypeOf(obj) != reflect.TypeOf(api.Profile{}) {
