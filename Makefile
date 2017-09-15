@@ -82,14 +82,13 @@ binary-containerized: vendor
 ci: clean docker-image check-copyright test-containerized st 
 
 ## Run UTs and FVs inside of a container.
-TARGET?="ut fv"
 test-containerized: vendor 
 	-mkdir -p .go-pkg-cache
 	docker run --rm --privileged --net=host \
 		-e LOCAL_USER_ID=$(LOCAL_USER_ID) \
 		-v $(CURDIR)/.go-pkg-cache:/go/pkg/:rw \
 		-v $(CURDIR):/go/src/$(PACKAGE_NAME):rw \
-		$(CALICO_BUILD) sh -c 'cd /go/src/$(PACKAGE_NAME) && make WHAT=$(WHAT) SKIP=$(SKIP) $(TARGET)'
+		$(CALICO_BUILD) sh -c 'cd /go/src/$(PACKAGE_NAME) && make WHAT=$(WHAT) SKIP=$(SKIP) ut fv'
 
 fv:
 	ginkgo tests/fv
