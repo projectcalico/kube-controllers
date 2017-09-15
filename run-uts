@@ -4,9 +4,9 @@ set -e
 
 if [ -z $SKIP ]
 then
-    SKIP="vendor"
+    SKIP="vendor,tests"
 else
-    SKIP="vendor,$SKIP"
+    SKIP="vendor,tests,$SKIP"
 fi
 
 echo "Removing old coverprofiles..."
@@ -14,7 +14,7 @@ find . -name "*.coverprofile" -type f -delete
 
 echo "Calculating packages to cover..."
 go_dirs=$(find -type f -name '*.go' | \
-	      grep -vE '/vendor/|.glide' | \
+	      grep -vE '/vendor/|.glide|tests' | \
 	      xargs -n 1 dirname | \
 	      sort | uniq | \
 	      tr '\n' ',' | \
