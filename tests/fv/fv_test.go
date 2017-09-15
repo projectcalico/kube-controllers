@@ -26,6 +26,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	log "github.com/sirupsen/logrus"
 
 	. "github.com/projectcalico/k8s-policy/tests/testutils"
 
@@ -38,7 +39,7 @@ import (
 const kubeconfigTemplate = `apiVersion: v1
 kind: Config
 clusters:
-- name: test 
+- name: test
   cluster:
     server: http://%s:8080
 users:
@@ -46,7 +47,7 @@ users:
 contexts:
 - name: test-context
   context:
-    cluster: test  
+    cluster: test
     user: calico
 current-context: test-context`
 
@@ -67,6 +68,7 @@ var _ = Describe("PolicyController", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Run apiserver.
+		log.Info("Starting a Kubernetes API server")
 		apiserver = testutils.RunK8sApiserver(etcd.IP)
 
 		// Write out a kubeconfig file
