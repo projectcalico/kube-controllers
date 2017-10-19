@@ -39,7 +39,7 @@ import (
 // This cache contains kubernetes node information keyed by etcd node-name.
 type cache struct {
 	sync.RWMutex
-	// The key for the cache's data is an etcd nodeName.
+	// The key for the cache's data is a k8sNodeName.
 	data map[string]string
 }
 
@@ -48,12 +48,11 @@ type cache struct {
 // It keeps a cache of known calico nodes and their corresponding kubernetes nodes to
 // accomplish this.
 type NodeController struct {
-	indexer       corecache.Indexer
-	informer      corecache.Controller
-	nodeDataCache calicocache.ResourceCache
-	nodeCache *cache
-	calicoClient  *client.Client
-	k8sClientset  *kubernetes.Clientset
+	informer                corecache.Controller
+	kubernetesResourceCache calicocache.ResourceCache
+	calicoNodeLookupCache   *cache
+	calicoClient            *client.Client
+	k8sClientset            *kubernetes.Clientset
 }
 
 
@@ -74,7 +73,7 @@ func NewNodeController(k8sClientset *kubernetes.Clientset, calicoClient *client.
 				// find its kubernetes orchRef
 				k8sNodeName, err := getK8sNodeRef(calicoNode)
 				if err != nil {
-					m[k8sNodeName] = ""
+					m[k8sNodeName] = calicoNode.Metadata.Name
 				}
 			}
 
@@ -91,7 +90,7 @@ func NewNodeController(k8sClientset *kubernetes.Clientset, calicoClient *client.
 
 	// Bind the Calico cache to kubernetes cache with the help of an informer. This way we make sure that
 	// whenever the kubernetes cache is updated, changes get reflected in the Calico cache as well.
-	indexer, informer := corecache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, corecache.ResourceEventHandlerFuncs{
+	_, informer := corecache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, corecache.ResourceEventHandlerFuncs{
 		DeleteFunc: func(obj interface{}) {
 			node, err := convert(obj)
 			if err != nil {
@@ -113,7 +112,7 @@ func NewNodeController(k8sClientset *kubernetes.Clientset, calicoClient *client.
 		},
 	}, corecache.Indexers{})
 
-	return &NodeController{indexer, informer, nodeDataCache, &nodeCache, calicoClient, k8sClientset}
+	return &NodeController{ informer, nodeDataCache, &nodeCache, calicoClient, k8sClientset}
 }
 
 // getK8sNodeRef is a helper method that searches an etcdNode for its kubernetes nodeRef.
@@ -132,7 +131,7 @@ func (c *NodeController) Run(threadiness int, reconcilerPeriod string, stopCh ch
 	defer uruntime.HandleCrash()
 
 	// Let the workers stop when we are done
-	workqueue := c.nodeDataCache.GetQueue()
+	workqueue := c.kubernetesResourceCache.GetQueue()
 	defer workqueue.ShutDown()
 
 	log.Info("Starting Node controller")
@@ -152,7 +151,7 @@ func (c *NodeController) Run(threadiness int, reconcilerPeriod string, stopCh ch
 	log.Debug("Finished syncing with Kubernetes API (Nodes)")
 
 	// Start Calico cache.
-	c.nodeDataCache.Run(reconcilerPeriod)
+	c.kubernetesResourceCache.Run(reconcilerPeriod)
 
 	// Start a number of worker threads to read from the queue.
 	for i := 0; i < threadiness; i++ {
@@ -170,7 +169,7 @@ func (c *NodeController) runWorker() {
 
 func (c *NodeController) processNextItem() bool {
 	// Wait until there is a new item in the work queue.
-	workqueue := c.nodeDataCache.GetQueue()
+	workqueue := c.kubernetesResourceCache.GetQueue()
 	key, quit := workqueue.Get()
 	if quit {
 		return false
@@ -187,7 +186,7 @@ func (c *NodeController) processNextItem() bool {
 	return true
 }
 
-// populateCache fills the nodeCache with initial data
+// populateCache fills the calicoNodeLookupCache with initial data
 // by querying the existing data stored in etcd.
 func (c *NodeController) populateCache() error {
 	nodes, err := c.calicoClient.Nodes().List(api.NodeMetadata{})
@@ -195,33 +194,33 @@ func (c *NodeController) populateCache() error {
 		return err
 	}
 
-	c.nodeCache.Lock()
+	c.calicoNodeLookupCache.Lock()
 	for _, node := range nodes.Items {
 		k8sNodeName, err := getK8sNodeRef(node)
 		if err != nil {
-			c.nodeCache.data[k8sNodeName] = node.Metadata.Name
+			c.calicoNodeLookupCache.data[k8sNodeName] = node.Metadata.Name
 		}
 
 	}
-	log.Infof("Current Cache: %v", c.nodeCache.data)
-	c.nodeCache.Unlock()
+	log.Infof("Current Cache: %v", c.calicoNodeLookupCache.data)
+	c.calicoNodeLookupCache.Unlock()
 	return nil
 }
 
 // syncToCalico syncs the given update to the Calico datastore.
 func (c *NodeController) syncToCalico(key string) error {
 	// Check if it exists in the controller's cache.
-	_, exists := c.nodeDataCache.Get(key)
+	_, exists := c.kubernetesResourceCache.Get(key)
 	log.Infof("%v", key)
 	if !exists {
 		// The object no longer exists - delete from the datastore.
 		log.Infof("Deleting node %s from Calico datastore", key)
 
-		calicoNodeName, exists := c.nodeCache.data[key]
+		calicoNodeName, exists := c.calicoNodeLookupCache.data[key]
 		if !exists {
-			log.Infof("Repopulating nodeCache due to miss: %v", calicoNodeName)
+			log.Infof("Repopulating calicoNodeLookupCache due to miss: %v", calicoNodeName)
 			c.populateCache()
-			calicoNodeName, exists = c.nodeCache.data[key]
+			calicoNodeName, exists = c.calicoNodeLookupCache.data[key]
 		}
 
 		if exists {
@@ -242,7 +241,7 @@ func (c *NodeController) syncToCalico(key string) error {
 
 // handleErr checks if an error happened and makes sure we will retry later.
 func (c *NodeController) handleErr(err error, key string) {
-	workqueue := c.nodeDataCache.GetQueue()
+	workqueue := c.kubernetesResourceCache.GetQueue()
 	if err == nil {
 		// Forget about the #AddRateLimited history of the key on every successful synchronization.
 		// This ensures that future processing of updates for this key is not delayed because of
