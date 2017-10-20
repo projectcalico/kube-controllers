@@ -29,8 +29,8 @@ import:
   - tools/cache
   - tools/clientcmd
 - package: github.com/projectcalico/libcalico-go
-  version: orch-refs
-  repo: https://github.com/ozdanborne/libcalico-go
+  version: v1-orchrefs
+  repo: https://github.com/heschlie/libcalico-go
 - package: github.com/projectcalico/felix
   repo: https://github.com/ozdanborne/felix
   version: fv-improvements
