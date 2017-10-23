@@ -75,6 +75,79 @@ var _ = Describe("PolicyController", func() {
 		time.Sleep(time.Second * 15)
 	})
 
+	Context("nodes", func() {
+		// It("should delete a node that exists at start of day", func() {})
+		// It("should delete nodes that nodeRef unexisting node in k8s"), func() {})
+		// It("should clean up dead data for nodes"
+		It("should be removed in response to a k8s node delete", func() {
+			kn := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "k8snode",
+				},
+			}
+			_, err := k8sClient.CoreV1().Nodes().Create(kn)
+			Expect(err).NotTo(HaveOccurred())
+
+			cn := &api.Node{
+				Metadata: api.NodeMetadata{
+					Name: "calnode",
+				},
+				Spec: api.NodeSpec{
+					OrchRefs: []api.OrchRef{
+						api.OrchRef{
+							NodeName: "k8snode",
+							Orchestrator: "k8s",
+						},
+					},
+				},
+			}
+			_, err = calicoClient.Nodes().Create(cn)
+			Expect(err).NotTo(HaveOccurred())
+
+			k8sClient.CoreV1().Nodes().Delete("k8snode", &metav1.DeleteOptions{})
+			Eventually(func() *api.Node {
+				node, _ := calicoClient.Nodes().Get(api.NodeMetadata{Name: "calnode"})
+				return node
+			}, time.Second*15, 500*time.Millisecond).Should(BeNil())
+		})
+
+		It("should not be removed if they don't reference any node.", func() {
+			cn := &api.Node{
+				Metadata: api.NodeMetadata{
+					Name: "calnode",
+				},
+				Spec: api.NodeSpec{
+					OrchRefs: []api.OrchRef{},
+				},
+			}
+			_, err := calicoClient.Nodes().Create(cn)
+			Expect(err).NotTo(HaveOccurred())
+
+			Consistently(func() *api.Node {
+				node, _ := calicoClient.Nodes().Get(api.NodeMetadata{Name: "calnode"})
+				return node
+			}, time.Second*15, 500*time.Millisecond).ShouldNot(BeNil())
+		})
+
+		It("should not be removed if they don't reference any node.", func() {
+			cn := &api.Node{
+				Metadata: api.NodeMetadata{
+					Name: "calnode",
+				},
+				Spec: api.NodeSpec{
+					OrchRefs: []api.OrchRef{},
+				},
+			}
+			_, err := calicoClient.Nodes().Create(cn)
+			Expect(err).NotTo(HaveOccurred())
+
+			Consistently(func() *api.Node {
+				node, _ := calicoClient.Nodes().Get(api.NodeMetadata{Name: "calnode"})
+				return node
+			}, time.Second*15, 500*time.Millisecond).ShouldNot(BeNil())
+		})
+	})
+
 	Context("profiles", func() {
 		var profName string
 		BeforeEach(func() {
