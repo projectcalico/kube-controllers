@@ -219,6 +219,7 @@ func (c *NodeController) syncToCalico(key string) error {
 	if !exists {
 		// The object no longer exists - delete from the datastore.
 		log.Infof("Node %s no longer exists.", key)
+		c.nodeLookupCache.Lock()
 		calicoNode, exists := c.nodeLookupCache.nodes[key]
 		if !exists {
 			log.Infof("Repopulating nodeLookupCache due to miss: %v", calicoNode)
@@ -234,7 +235,11 @@ func (c *NodeController) syncToCalico(key string) error {
 			err := c.calicoClient.Nodes().Delete(api.NodeMetadata{Name: calicoNode.Name})
 			if _, ok := err.(errors.ErrorResourceDoesNotExist); !ok {
 				// We hit an error other than "does not exist".
+				c.nodeLookupCache.Unlock()
 				return err
+			} else {
+				delete(c.nodeLookupCache.nodes, key)
+				c.nodeLookupCache.Unlock()
 			}
 		}
 
