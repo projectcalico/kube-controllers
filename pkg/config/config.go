@@ -36,6 +36,15 @@ type Config struct {
 
 	// Path to a kubeconfig file to use for accessing the k8s API.
 	Kubeconfig string `default:"" split_words:"false"`
+
+	// LeaderElection
+	EnableLeaderelection bool `default:"false" split_words:"true"`
+	LeaderelectionIdentity string `default:"" split_words:"true"`
+	LeaderelectionLeaseDuration string `default:"1m" split_words:"true"`
+	LeaderelectionNamespace string `default:"kube-system" split_words:"true"`
+	LeaderelectionName string `default:"calico-kube-controllers" split_words:"true"`
+
+
 }
 
 // Parse parses envconfig and stores in Config struct
