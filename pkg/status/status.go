@@ -16,15 +16,22 @@ package status
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
-	DefaultStatusFile string = "status.json"
+	DefaultStatusFile = "status.json"
+)
+
+var (
+	writeRetryTime      = 4 * time.Second
+	writeRetryLogEveryN = 5
 )
 
 type ConditionStatus struct {
@@ -36,6 +43,7 @@ type Status struct {
 	Readiness  map[string]ConditionStatus
 	readyMutex sync.Mutex
 	statusFile string
+	trigger    chan struct{}
 }
 
 func New(file string) *Status {
@@ -46,20 +54,16 @@ func New(file string) *Status {
 	return &st
 }
 
-// SetReady sets the status of one ready key and the reason associated with
-// that status.
-func (s *Status) SetReady(key string, val bool, reason string) {
-	needUpdate := false
+// SetReady sets the status of one ready key and the reason associated with that status.
+// Note that the first call to SetReady will start a long-running goroutine to write out the status data to
+// file.
+func (s *Status) SetReady(key string, ready bool, reason string) {
 	s.readyMutex.Lock()
-	if prev, ok := s.Readiness[key]; !ok {
-		needUpdate = true
-	} else if prev.Ready != val || prev.Reason != reason {
-		needUpdate = true
-	}
-	s.Readiness[key] = ConditionStatus{Ready: val, Reason: reason}
-	s.readyMutex.Unlock()
-	if needUpdate {
-		_ = s.WriteStatus()
+	defer s.readyMutex.Unlock()
+
+	if prev, ok := s.Readiness[key]; !ok || prev.Ready != ready || prev.Reason != reason {
+		s.Readiness[key] = ConditionStatus{Ready: ready, Reason: reason}
+		s.triggerWriteStatus()
 	}
 }
 
@@ -68,6 +72,7 @@ func (s *Status) SetReady(key string, val bool, reason string) {
 func (s *Status) GetReady(key string) bool {
 	s.readyMutex.Lock()
 	defer s.readyMutex.Unlock()
+
 	v, ok := s.Readiness[key]
 	if !ok {
 		return false
@@ -97,9 +102,10 @@ func (s *Status) GetReadiness() bool {
 // are not ready the reasons are combined and returned.
 // The output format is '<reason 1>; <reason 2>'.
 func (s *Status) GetNotReadyConditions() string {
-	var unready []string
 	s.readyMutex.Lock()
 	defer s.readyMutex.Unlock()
+
+	var unready []string
 	for _, v := range s.Readiness {
 		if !v.Ready {
 			unready = append(unready, v.Reason)
@@ -109,18 +115,52 @@ func (s *Status) GetNotReadyConditions() string {
 
 }
 
-// WriteStatus writes out the status in json format.
-func (c *Status) WriteStatus() error {
-	b, err := json.Marshal(c)
-	if err != nil {
-		logrus.Errorf("Failed to marshal readiness: %s", err)
-		return err
+// triggerWriteStatus triggers an asynchronous write of this status to file.
+// The readyMutex lock should be held by the caller.
+func (s *Status) triggerWriteStatus() {
+	if s.trigger == nil {
+		// We haven't started the writer goroutine yet, create a wakeup channel of length 1.
+		s.trigger = make(chan struct{}, 1)
+		go func() {
+			for _ = range s.trigger {
+				if err := s.writeStatus(); err != nil {
+					// If we errored writing the status, enter a retry loop.
+					for i := 0; err != nil; i++ {
+						if i%writeRetryLogEveryN == 0 {
+							log.WithError(err).Info("Unable to write status file")
+						}
+						time.Sleep(writeRetryTime)
+						err = s.writeStatus()
+					}
+					log.Infof("Status file written after previous failure")
+				}
+			}
+		}()
 	}
 
-	err = ioutil.WriteFile(c.statusFile, b, 0644)
+	// Trigger a write by sending a message in the trigger channel. Since we always write out the latest settings, there
+	// is no point in having more than 1 pending update - so make this a non-blocking send since the channel has a non-zero
+	// capacity.
+	select {
+	case s.trigger <- struct{}{}:
+	default:
+	}
+}
+
+// WriteStatus writes out the status in json format.
+func (s *Status) writeStatus() error {
+	s.readyMutex.Lock()
+	b, err := json.Marshal(s)
+	filename := s.statusFile
+	s.readyMutex.Unlock()
+
 	if err != nil {
-		logrus.Errorf("Failed to write readiness file: %s", err)
-		return err
+		return fmt.Errorf("Failed to marshal readiness: %v", err)
+	}
+
+	err = ioutil.WriteFile(filename, b, 0644)
+	if err != nil {
+		return fmt.Errorf("Failed to write readiness file: %v", err)
 	}
 
 	return nil
@@ -128,15 +168,15 @@ func (c *Status) WriteStatus() error {
 
 // ReadStatusFile reads in the status file as written by WriteStatus.
 func ReadStatusFile(file string) (*Status, error) {
-	st := Status{}
+	st := &Status{}
 	contents, err := ioutil.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
-	err = json.Unmarshal(contents, &st)
+	err = json.Unmarshal(contents, st)
 	if err != nil {
 		return nil, err
 	}
 
-	return &st, nil
+	return st, nil
 }
