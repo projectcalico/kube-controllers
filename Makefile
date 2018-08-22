@@ -57,10 +57,11 @@ ifeq ($(BUILDARCH),amd64)
         ETCD_IMAGE=quay.io/coreos/etcd:$(ETCD_VERSION)
 endif
 
-# Makefile configuration options
-CONTAINER_NAME=calico/kube-controllers
+# Makefile configuration options 
+BUILD_IMAGE_ORG ?= calico
+CONTAINER_NAME=calico/kube-controllers$(ARCHTAG)
 PACKAGE_NAME?=github.com/projectcalico/kube-controllers
-CALICO_BUILD?=calico/go-build:$(GO_BUILD_VER)
+CALICO_BUILD?=$(BUILD_IMAGE_ORG)/go-build:$(GO_BUILD_VER)
 LIBCALICOGO_PATH?=none
 LOCAL_USER_ID?=$(shell id -u $$USER)
 
