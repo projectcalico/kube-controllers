@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/patrickmn/go-cache"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/util/workqueue"
 )
