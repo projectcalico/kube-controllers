@@ -53,30 +53,49 @@ type NodeController struct {
 
 // NewNodeController Constructor for NodeController
 func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, calicoClient client.Interface) controller.Controller {
+	nc := &NodeController{
+		ctx:          ctx,
+		calicoClient: calicoClient,
+		k8sClientset: k8sClientset,
+		rl:           workqueue.DefaultControllerRateLimiter(),
+	}
 	// channel used to kick the controller into scheduling a sync. It has length
 	// 1 so that we coalesce multiple kicks while a sync is happening down to
 	// just one additional sync.
-	schedule := make(chan interface{}, 1)
+	nc.schedule = make(chan interface{}, 1)
 
 	// Create a Node watcher.
 	listWatcher := cache.NewListWatchFromClient(k8sClientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())
 
 	// Informer handles managing the watch and signals us when nodes are deleted.
-	_, informer := cache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, cache.ResourceEventHandlerFuncs{
+	//   also syncs up labels between k8s/calico node objects
+	_, nc.informer = cache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			nc.applyKddNodeLabels(obj.(*v1.Node))
+		},
+		UpdateFunc: func(_, obj interface{}) {
+			nc.applyKddNodeLabels(obj.(*v1.Node))
+		},
 		DeleteFunc: func(obj interface{}) {
 			// Just kick controller to wake up and perform a sync. No need to bother what node it was
 			// as we sync everything.
-			kick(schedule)
+			kick(nc.schedule)
 		},
 	}, cache.Indexers{})
 
-	return &NodeController{
-		ctx:          ctx,
-		informer:     informer,
-		calicoClient: calicoClient,
-		k8sClientset: k8sClientset,
-		rl:           workqueue.DefaultControllerRateLimiter(),
-		schedule:     schedule,
+	return nc
+}
+
+// applyKddNodeLabels applies the labels found in v1.Node and to the calico-equivalent node
+func (nc *NodeController) applyKddNodeLabels(node *v1.Node) {
+	calNode, err := nc.calicoClient.Nodes().Get(context.Background(), node.Name, options.GetOptions{})
+	if err != nil {
+		log.WithError(err).Error("failed to get node: " + node.Name)
+	}
+	if calNode.DiffK8sMeta(node.ObjectMeta) {
+		if _, err := nc.calicoClient.Nodes().Update(context.Background(), calNode, options.SetOptions{}); err != nil {
+			log.WithError(err).Error("failed to update node: " + node.Name)
+		}
 	}
 }
 
