@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
+	"github.com/projectcalico/kube-controllers/pkg/config"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/controller"
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
@@ -52,7 +53,7 @@ type NodeController struct {
 }
 
 // NewNodeController Constructor for NodeController
-func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, calicoClient client.Interface) controller.Controller {
+func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, calicoClient client.Interface, cfg *config.Config) controller.Controller {
 	nc := &NodeController{
 		ctx:          ctx,
 		calicoClient: calicoClient,
@@ -67,21 +68,27 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	// Create a Node watcher.
 	listWatcher := cache.NewListWatchFromClient(k8sClientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())
 
-	// Informer handles managing the watch and signals us when nodes are deleted.
-	//   also syncs up labels between k8s/calico node objects
-	_, nc.informer = cache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			nc.applyKddNodeLabels(obj.(*v1.Node))
-		},
-		UpdateFunc: func(_, obj interface{}) {
-			nc.applyKddNodeLabels(obj.(*v1.Node))
-		},
+	// Setup event handlers
+	handlers := cache.ResourceEventHandlerFuncs{cache.ResourceEventHandlerFuncs{
 		DeleteFunc: func(obj interface{}) {
 			// Just kick controller to wake up and perform a sync. No need to bother what node it was
 			// as we sync everything.
 			kick(nc.schedule)
-		},
-	}, cache.Indexers{})
+		}}}
+
+	// Only setup node labels syncer if env var is set
+	if cfg.SyncNodeLabels {
+		handlers.AddFunc = func(obj interface{}) {
+			nc.applyKddNodeLabels(obj.(*v1.Node))
+		}
+		handlers.UpdateFunc = func(_, obj interface{}) {
+			nc.applyKddNodeLabels(obj.(*v1.Node))
+		}
+	}
+
+	// Informer handles managing the watch and signals us when nodes are deleted.
+	//   also syncs up labels between k8s/calico node objects
+	_, nc.informer = cache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, handlers, cache.Indexers{})
 
 	return nc
 }
