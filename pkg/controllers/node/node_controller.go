@@ -16,6 +16,7 @@ package node
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -39,6 +40,11 @@ const (
 	RateLimitCalicoList   = "calico-list"
 	RateLimitK8s          = "k8s"
 	RateLimitCalicoDelete = "calico-delete"
+)
+
+var (
+	maxAttempts    = 5
+	retrySleepTime = 3 * time.Second
 )
 
 // NodeController implements the Controller interface.  It is responsible for monitoring
@@ -69,20 +75,20 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	listWatcher := cache.NewListWatchFromClient(k8sClientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())
 
 	// Setup event handlers
-	handlers := cache.ResourceEventHandlerFuncs{cache.ResourceEventHandlerFuncs{
+	handlers := cache.ResourceEventHandlerFuncs{
 		DeleteFunc: func(obj interface{}) {
 			// Just kick controller to wake up and perform a sync. No need to bother what node it was
 			// as we sync everything.
 			kick(nc.schedule)
-		}}}
+		}}
 
 	// Only setup node labels syncer if env var is set
 	if cfg.SyncNodeLabels {
 		handlers.AddFunc = func(obj interface{}) {
-			nc.applyKddNodeLabels(obj.(*v1.Node))
+			nc.applyNodeLabels(obj.(*v1.Node))
 		}
 		handlers.UpdateFunc = func(_, obj interface{}) {
-			nc.applyKddNodeLabels(obj.(*v1.Node))
+			nc.applyNodeLabels(obj.(*v1.Node))
 		}
 	}
 
@@ -93,12 +99,26 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	return nc
 }
 
-// applyKddNodeLabels applies the labels found in v1.Node and to calico's Node.
-func (nc *NodeController) applyKddNodeLabels(node *v1.Node) {
-	// Get calico's Node object.
-	calNode, err := nc.calicoClient.Nodes().Get(context.Background(), node.Name, options.GetOptions{})
-	if err != nil {
-		log.WithError(err).Error("failed to get node: " + node.Name)
+// applyNodeLabels applies the labels found in v1.Node and to calico's Node.
+func (nc *NodeController) applyNodeLabels(node *v1.Node) {
+	var calNode *api.Node
+	var err error
+	var nAttempts int
+
+	// Try to get calico's Node object multiple times.
+	for nAttempts = 1; nAttempts < maxAttempts; nAttempts++ {
+		calNode, err = nc.calicoClient.Nodes().Get(context.Background(), node.Name, options.GetOptions{})
+		if err != nil {
+			log.WithField("attempts", nAttempts).WithError(err).Error("failed to get node: " + node.Name)
+			nAttempts++
+			time.Sleep(retrySleepTime)
+			continue
+		}
+		break
+	}
+	if err != nil && nAttempts == maxAttempts {
+		log.WithError(err).Error("failed to get node too many times")
+		return
 	}
 
 	// Labels may be nil.
@@ -106,22 +126,26 @@ func (nc *NodeController) applyKddNodeLabels(node *v1.Node) {
 		calNode.ObjectMeta.Labels = make(map[string]string)
 	}
 
-	// Only override labels if does not exist or changed.
-	changed := false
-	for labelKey, labelValue := range node.ObjectMeta.Labels {
-		if oldLabelValue, exists := calNode.ObjectMeta.Labels[labelKey]; exists && (oldLabelValue == labelValue) {
-			continue
-		}
-		calNode.ObjectMeta.Labels[labelKey] = labelValue
-		changed = true
-	}
+	// Only override labels if they are not already synced.
+	if reflect.DeepEqual(node.ObjectMeta.Labels, calNode.ObjectMeta.Labels) {
+		calNode.ObjectMeta.Labels = node.ObjectMeta.Labels
 
-	// Only update if a change has occurred
-	if !changed {
-		return
-	}
-	if _, err := nc.calicoClient.Nodes().Update(context.Background(), calNode, options.SetOptions{}); err != nil {
-		log.WithError(err).Error("failed to update node: " + node.Name)
+		// Try to update node multiple times.
+		for nAttempts = 1; nAttempts < maxAttempts; nAttempts++ {
+			if _, err := nc.calicoClient.Nodes().Update(context.Background(), calNode, options.SetOptions{}); err != nil {
+				log.WithField("attempts", nAttempts).WithError(err).Error("failed to update node: " + node.Name)
+				nAttempts++
+				time.Sleep(retrySleepTime)
+				continue
+			}
+			break
+		}
+		if err != nil && nAttempts == maxAttempts {
+			log.WithError(err).Error("failed to update node too many times")
+			return
+		}
+
+		log.WithField("node", node.ObjectMeta.Name).Info("successfully synced Node labels")
 	}
 }
 
