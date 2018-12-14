@@ -93,16 +93,35 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	return nc
 }
 
-// applyKddNodeLabels applies the labels found in v1.Node and to the calico-equivalent node
+// applyKddNodeLabels applies the labels found in v1.Node and to calico's Node.
 func (nc *NodeController) applyKddNodeLabels(node *v1.Node) {
+	// Get calico's Node object.
 	calNode, err := nc.calicoClient.Nodes().Get(context.Background(), node.Name, options.GetOptions{})
 	if err != nil {
 		log.WithError(err).Error("failed to get node: " + node.Name)
 	}
-	if calNode.DiffK8sMeta(node.ObjectMeta) {
-		if _, err := nc.calicoClient.Nodes().Update(context.Background(), calNode, options.SetOptions{}); err != nil {
-			log.WithError(err).Error("failed to update node: " + node.Name)
+
+	// Labels may be nil.
+	if calNode.ObjectMeta.Labels == nil {
+		calNode.ObjectMeta.Labels = make(map[string]string)
+	}
+
+	// Only override labels if does not exist or changed.
+	changed := false
+	for labelKey, labelValue := range node.ObjectMeta.Labels {
+		if oldLabelValue, exists := calNode.ObjectMeta.Labels[labelKey]; exists && (oldLabelValue == labelValue) {
+			continue
 		}
+		calNode.ObjectMeta.Labels[labelKey] = labelValue
+		changed = true
+	}
+
+	// Only update if a change has occurred
+	if !changed {
+		return
+	}
+	if _, err := nc.calicoClient.Nodes().Update(context.Background(), calNode, options.SetOptions{}); err != nil {
+		log.WithError(err).Error("failed to update node: " + node.Name)
 	}
 }
 
