@@ -1,11 +1,10 @@
 hash: a52b69b96001d068a73ccbee86f15dd6068c8848bf63fad85830f9c916ed4f7d
-updated: 2019-08-03T04:18:18.609950486Z
+updated: 2019-08-05T10:40:50.254434821+01:00
 imports:
 - name: cloud.google.com/go
-  version: 3b1ae45394a234c385be014e9a488f2bb6eef821
+  version: 0ebda48a7f143b1cce9eb37a8c1106ac762a3430
   subpackages:
   - compute/metadata
-  - internal
 - name: github.com/Azure/go-autorest
   version: 1ff28809256a84bb6966640ff3d0371af82ccba4
   subpackages:
@@ -38,7 +37,7 @@ imports:
 - name: github.com/ghodss/yaml
   version: 0ca9ea5df5451ffdf184b4428c902747c2c11cd7
 - name: github.com/go-ini/ini
-  version: 9c8236e659b76e87bf02044d06fde8683008ff3e
+  version: 8659100d2d9ecf3760a41838b1886db49426d001
 - name: github.com/go-playground/locales
   version: f63010822830b6fe52288ee52d5a1151088ce039
   subpackages:
@@ -66,9 +65,9 @@ imports:
 - name: github.com/google/btree
   version: 925471ac9e2131377a91e1595defec898166fe49
 - name: github.com/google/gofuzz
-  version: 24818f796faf91cd76ec7bddd72458fbced7a6c1
+  version: f140a6486e521aad38f5917de355cbf147cc0496
 - name: github.com/google/uuid
-  version: d460ce9f8df2e77fb1ba55ca87fafed96c607494
+  version: 0cd6bf5da1e1c83f8b45653022c74f71af0538a4
 - name: github.com/googleapis/gnostic
   version: 0c5108395e2debce0d731cf0287ddf7242066aba
   subpackages:
@@ -106,7 +105,7 @@ imports:
 - name: github.com/json-iterator/go
   version: f2b4162afba35581b6d4a50d3b8f34e33c144682
 - name: github.com/kardianos/osext
-  version: ae77be60afb1dcacde03767a8c37337fad28ac14
+  version: 2bc1f35cddc0cc527b4bc3dce8578fc2a6c11384
 - name: github.com/kelseyhightower/envconfig
   version: dd1402a4d99de9ac2f396cd6fcb957bc2c695ec1
 - name: github.com/leodido/go-urn
@@ -120,7 +119,7 @@ imports:
 - name: github.com/modern-go/reflect2
   version: 94122c33edd36123c84d5368cfb2b69df93a0ec8
 - name: github.com/onsi/ginkgo
-  version: 3774a09d95489ccaa16032e0770d08ea77ba6184
+  version: eea6ad008b96acdaa524f5b409513bf062b500ad
   subpackages:
   - config
   - internal/codelocation
@@ -140,7 +139,7 @@ imports:
   - reporters/stenographer/support/go-isatty
   - types
 - name: github.com/onsi/gomega
-  version: 5533ce8a0da374da682cd53d70ddcc54adf1a710
+  version: 90e289841c1ed79b7a598a7cd9959750cb5e89e2
   subpackages:
   - format
   - internal/assertion
@@ -160,7 +159,7 @@ imports:
 - name: github.com/peterbourgon/diskv
   version: 5f041e8faa004a95c88a202771f4cc3e991971e6
 - name: github.com/projectcalico/felix
-  version: 3774b6b48ee739b326598f9978147fa85650c2a0
+  version: ae7e53608b47ceb6eb7fe249fceb80e8028ff4e2
   subpackages:
   - calc
   - config
@@ -244,7 +243,7 @@ imports:
 - name: github.com/satori/go.uuid
   version: f58768cc1a7a7e77a3bd49e98cdd21419399b6a3
 - name: github.com/sirupsen/logrus
-  version: f006c2ac4710855cf0f916dd6b77acf6b048dc6e
+  version: d682213848ed68c0a260ca37d6dd5ace8423f5ba
 - name: github.com/spf13/pflag
   version: e57e3eeb33f795204c1ca35f56c44f83227c6e66
 - name: golang.org/x/crypto
@@ -268,7 +267,7 @@ imports:
   - lex/httplex
   - trace
 - name: golang.org/x/oauth2
-  version: a6bd8cefa1811bd24b86f8902872e4e8225f74c4
+  version: 9f3314589c9a9136388751d9adae6b0ed400978a
   subpackages:
   - google
   - internal
@@ -427,13 +426,14 @@ imports:
   - pkg/watch
   - third_party/forked/golang/reflect
 - name: k8s.io/apiserver
-  version: cc449ec47086d4fe7a0b97fea7398a4f80734adc
+  version: bf12d466f6282def0ab436ca052bb603cccbcfc6
   subpackages:
+  - pkg/features
   - pkg/storage
-  - pkg/storage/etcd
-  - pkg/storage/etcd/metrics
   - pkg/storage/etcd3
+  - pkg/storage/etcd3/metrics
   - pkg/storage/value
+  - pkg/util/feature
 - name: k8s.io/client-go
   version: 7d04d0e2a0a1a4d4a1cd6baa432a2301492e4e65
   subpackages:
@@ -501,8 +501,12 @@ imports:
   - util/jsonpath
   - util/retry
   - util/workqueue
+- name: k8s.io/component-base
+  version: 327675bd8ec35fe34a658207d9c3ecfdf0d6b462
+  subpackages:
+  - featuregate
 - name: k8s.io/klog
-  version: e531227889390a39d9533dde61f590fe9f4b0035
+  version: 89e63fd5117f8c20208186ef85f096703a280c20
 - name: k8s.io/utils
   version: c2654d5206da6b7b6ace12841e8f359bb89b443c
   subpackages:
