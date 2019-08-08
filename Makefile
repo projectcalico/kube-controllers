@@ -322,7 +322,8 @@ fv: remote-deps tests/fv/fv.test image
 		HYPERKUBE_IMAGE=$(HYPERKUBE_IMAGE) \
 		CONTAINER_NAME=$(BUILD_IMAGE):latest-$(ARCH) \
 		PRIVATE_KEY=`pwd`/private.key \
-		CRDS_FILE=${PWD}/crds.yaml \
+		CRDS_FILE=`pwd`/../../crds.yaml \
+		GO111MODULE=on \
 		./fv.test $(GINKGO_ARGS) -ginkgo.slowSpecThreshold 30
 
 tests/fv/fv.test: local_build $(shell find ./tests -type f -name '*.go' -print)
