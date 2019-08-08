@@ -269,7 +269,7 @@ sub-tag-images-%:
 ## Perform static checks on the code.
 
 # TODO: re-enable these linters !
-LINT_ARGS :=
+LINT_ARGS := --disable errcheck,gosimple
 
 static-checks:
 	$(DOCKER_RUN) $(CALICO_BUILD) golangci-lint run --deadline 5m $(LINT_ARGS)
