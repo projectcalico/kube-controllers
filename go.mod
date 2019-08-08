@@ -3,71 +3,55 @@ module github.com/projectcalico/kube-controllers
 go 1.12
 
 require (
-	cloud.google.com/go v0.0.0-20160913182117-3b1ae45394a2
-	github.com/Azure/go-autorest v11.1.0+incompatible
-	github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973
+	cloud.google.com/go v0.0.0-20160913182117-3b1ae45394a2 // indirect
+	github.com/Azure/go-autorest v11.1.0+incompatible // indirect
 	github.com/coreos/etcd v3.3.10+incompatible
-	github.com/davecgh/go-spew v1.1.1
-	github.com/dgrijalva/jwt-go v3.0.0+incompatible
-	github.com/ghodss/yaml v1.0.0
-	github.com/go-ini/ini v1.39.0
-	github.com/go-playground/locales v0.12.1
-	github.com/go-playground/universal-translator v0.0.0-20170327191703-71201497bace
-	github.com/gogo/protobuf v0.0.0-20171007142547-342cbe0a0415
-	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
-	github.com/golang/protobuf v1.2.0
-	github.com/google/btree v0.0.0-20161005200959-925471ac9e21
-	github.com/google/gofuzz v0.0.0-20170612174753-24818f796faf
-	github.com/google/uuid v1.0.0
-	github.com/googleapis/gnostic v0.0.0-20170729233727-0c5108395e2d
-	github.com/gophercloud/gophercloud v0.0.0-20190126172459-c818fa66e4c8
-	github.com/gregjones/httpcache v0.0.0-20170728041850-787624de3eb7
-	github.com/hashicorp/go-version v1.2.0
-	github.com/hashicorp/golang-lru v0.5.0
-	github.com/hpcloud/tail v1.0.0
-	github.com/imdario/mergo v0.3.5
-	github.com/json-iterator/go v0.0.0-20180701071628-ab8a2e0c74be
-	github.com/kardianos/osext v0.0.0-20170510131534-ae77be60afb1
+	github.com/dgrijalva/jwt-go v3.0.0+incompatible // indirect
+	github.com/ghodss/yaml v1.0.0 // indirect
+	github.com/go-ini/ini v1.39.0 // indirect
+	github.com/go-playground/locales v0.12.1 // indirect
+	github.com/go-playground/universal-translator v0.0.0-20170327191703-71201497bace // indirect
+	github.com/golang/groupcache v0.0.0-20190702054246-869f871628b6 // indirect
+	github.com/google/btree v0.0.0-20161005200959-925471ac9e21 // indirect
+	github.com/gophercloud/gophercloud v0.0.0-20190126172459-c818fa66e4c8 // indirect
+	github.com/hashicorp/go-version v1.2.0 // indirect
+	github.com/imdario/mergo v0.3.5 // indirect
+	github.com/json-iterator/go v0.0.0-20180701071628-ab8a2e0c74be // indirect
+	github.com/kardianos/osext v0.0.0-20170510131534-ae77be60afb1 // indirect
 	github.com/kelseyhightower/envconfig v0.0.0-20180517194557-dd1402a4d99d
-	github.com/leodido/go-urn v0.0.0-20181204092800-a67a23e1c1af
-	github.com/matttproud/golang_protobuf_extensions v1.0.1
-	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
-	github.com/modern-go/reflect2 v1.0.1
+	github.com/leodido/go-urn v0.0.0-20181204092800-a67a23e1c1af // indirect
+	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
+	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/onsi/ginkgo v1.6.0
 	github.com/onsi/gomega v0.0.0-20190113212917-5533ce8a0da3
 	github.com/patrickmn/go-cache v0.0.0-20180815053127-5633e0862627
-	github.com/pborman/uuid v1.2.0
-	github.com/peterbourgon/diskv v2.0.1+incompatible
 	github.com/projectcalico/felix v0.0.0-20190419061543-3774b6b48ee7
-	github.com/projectcalico/go-json v0.0.0-20161128004156-6219dc7339ba
-	github.com/projectcalico/go-yaml v0.0.0-20161201183616-955bc3e451ef
-	github.com/projectcalico/go-yaml-wrapper v0.0.0-20161127220527-598e54215bee
-	github.com/projectcalico/libcalico-go v0.0.0-20190719174102-241d8b0486a3
-	github.com/prometheus/client_golang v0.9.2
-	github.com/prometheus/client_model v0.0.0-20180712105110-5c3871d89910
-	github.com/prometheus/common v0.0.0-20181126121408-4724e9255275
-	github.com/prometheus/procfs v0.0.0-20181204211112-1dc9a6cbc91a
+	github.com/projectcalico/go-json v0.0.0-20161128004156-6219dc7339ba // indirect
+	github.com/projectcalico/go-yaml v0.0.0-20161201183616-955bc3e451ef // indirect
+	github.com/projectcalico/go-yaml-wrapper v0.0.0-20161127220527-598e54215bee // indirect
+	github.com/projectcalico/libcalico-go v0.0.0-20190807202433-7be0d765781f
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.2.0
+	github.com/smartystreets/goconvey v0.0.0-20190731233626-505e41936337 // indirect
 	github.com/spf13/pflag v1.0.1
-	golang.org/x/crypto v0.0.0-20181025213731-e84da0312774
-	golang.org/x/net v0.0.0-20190206173232-65e2d4e15006
-	golang.org/x/oauth2 v0.0.0-20170412232759-a6bd8cefa181
-	golang.org/x/sys v0.0.0-20190312061237-fead79001313
-	golang.org/x/text v0.3.1-0.20181227161524-e6919f6577db
-	golang.org/x/time v0.0.0-20170420181420-c06e80d9300e
-	google.golang.org/appengine v1.5.0
-	google.golang.org/genproto v0.0.0-20170731182057-09f6ed296fc6
-	google.golang.org/grpc v1.13.0
-	gopkg.in/fsnotify.v1 v1.4.7
-	gopkg.in/go-playground/validator.v9 v9.27.0
-	gopkg.in/inf.v0 v0.9.0
-	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7
-	gopkg.in/yaml.v2 v2.2.1
+	golang.org/x/oauth2 v0.0.0-20170412232759-a6bd8cefa181 // indirect
+	golang.org/x/sys v0.0.0-20190312061237-fead79001313 // indirect
+	golang.org/x/text v0.3.1-0.20181227161524-e6919f6577db // indirect
+	golang.org/x/time v0.0.0-20170420181420-c06e80d9300e // indirect
+	google.golang.org/appengine v1.5.0 // indirect
+	gopkg.in/go-playground/assert.v1 v1.2.1 // indirect
+	gopkg.in/go-playground/validator.v9 v9.27.0 // indirect
+	gopkg.in/inf.v0 v0.9.0 // indirect
+	gopkg.in/ini.v1 v1.46.0 // indirect
 	k8s.io/api v0.0.0-20190419092548-c5cad27821f6
 	k8s.io/apimachinery v0.0.0-20190419212445-b874eabb9a4e
 	k8s.io/apiserver v0.0.0-20190423173055-cc449ec47086
-	k8s.io/client-go v8.0.0+incompatible
+	k8s.io/client-go v11.0.1-0.20190409021438-1a26190bd76a+incompatible
 	k8s.io/klog v0.3.0
-	k8s.io/utils v0.0.0-20190221042446-c2654d5206da
+)
+
+replace (
+	k8s.io/api => k8s.io/api v0.0.0-20190409021203-6e4e0e4f393b
+	k8s.io/apimachinery => k8s.io/apimachinery v0.0.0-20190404173353-6a84e37a896d
+	k8s.io/client-go => k8s.io/client-go v11.0.1-0.20190409021438-1a26190bd76a+incompatible
 )
