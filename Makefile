@@ -153,7 +153,7 @@ clean:
 	-docker rmi $(BUILD_IMAGE):latest-amd64
 	rm -f tests/fv/fv.test
 	rm -f report/*.xml
-	rm -f crds.yaml
+	rm -f tests/crds.yaml
 
 ###############################################################################
 # Building the binary
@@ -304,8 +304,8 @@ foss-checks:
 remote-deps:
 	$(DOCKER_RUN) $(CALICO_BUILD) sh -c ' \
         go mod download; \
-        cp `go list -m -f "{{.Dir}}" github.com/projectcalico/libcalico-go`/test/crds.yaml crds.yaml; \
-        chmod +w crds.yaml'
+        cp `go list -m -f "{{.Dir}}" github.com/projectcalico/libcalico-go`/test/crds.yaml tests/crds.yaml; \
+        chmod +w tests/crds.yaml'
 
 ###############################################################################
 # Tests
@@ -322,7 +322,7 @@ fv: remote-deps tests/fv/fv.test image
 		HYPERKUBE_IMAGE=$(HYPERKUBE_IMAGE) \
 		CONTAINER_NAME=$(BUILD_IMAGE):latest-$(ARCH) \
 		PRIVATE_KEY=`pwd`/private.key \
-		CRDS_FILE=`pwd`/../../crds.yaml \
+		CRDS_FILE=${PWD}/tests/crds.yaml \
 		GO111MODULE=on \
 		./fv.test $(GINKGO_ARGS) -ginkgo.slowSpecThreshold 30
 

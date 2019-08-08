@@ -53,7 +53,7 @@ current-context: test-context`
 
 func RunK8sApiserver(etcdIp string) *containers.Container {
 	return containers.Run("st-apiserver",
-		containers.RunOpts{AutoRemove: true},
+		containers.RunOpts{AutoRemove: false},
 		"-v", os.Getenv("PRIVATE_KEY")+":/private.key",
 		"-v", os.Getenv("CRDS_FILE")+":/crds.yaml",
 		fmt.Sprintf("%s", os.Getenv("HYPERKUBE_IMAGE")),
