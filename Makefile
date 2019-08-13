@@ -177,7 +177,7 @@ update-libcalico:
 		go mod edit -droprequire github.com/projectcalico/libcalico-go; \
 		go get $(LIBCALICO_REPO)@$(LIBCALICO_VERSION); \
 		if [ $(LIBCALICO_REPO) != "github.com/projectcalico/libcalico-go" ]; then \
-			go mod edit -replace github.com/projectcalico/typha=$(LIBCALICO_REPO)@$(LIBCALICO_VERSION); \
+			go mod edit -replace github.com/projectcalico/libcalico-go=$(LIBCALICO_REPO)@$(LIBCALICO_VERSION); \
 		fi;\
 	fi'
 
