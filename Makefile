@@ -177,7 +177,7 @@ update-libcalico:
 		go mod edit -droprequire github.com/projectcalico/libcalico-go; \
 		go get $(LIBCALICO_REPO)@$(LIBCALICO_VERSION); \
 		if [ $(LIBCALICO_REPO) != "github.com/projectcalico/libcalico-go" ]; then \
-			go mod edit -replace github.com/projectcalico/typha=$(LIBCALICO_REPO)@$(LIBCALICO_VERSION); \
+			go mod edit -replace github.com/projectcalico/libcalico-go=$(LIBCALICO_REPO)@$(LIBCALICO_VERSION); \
 		fi;\
 	fi'
 
@@ -268,11 +268,8 @@ sub-tag-images-%:
 .PHONY: static-checks
 ## Perform static checks on the code.
 
-# TODO: re-enable these linters !
-LINT_ARGS := --disable errcheck,gosimple
-
 static-checks:
-	$(DOCKER_RUN) $(CALICO_BUILD) golangci-lint run --deadline 5m $(LINT_ARGS)
+	$(DOCKER_RUN) $(CALICO_BUILD) golangci-lint run --deadline 5m
 
 .PHONY: fix
 ## Fix static checks
