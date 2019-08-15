@@ -60,7 +60,12 @@ LOCAL_USER_ID:=$(shell id -u)
 LOCAL_GROUP_ID:=$(shell id -g)
 
 ifdef GOPATH
-	EXTRA_DOCKER_ARGS += -v $(GOPATH)/pkg/mod:/go/pkg/mod:rw
+ifneq ($(GOPATH),)
+ifndef CIRCLECI
+	LOCAL_GOPATH = $(shell echo $(GOPATH) | cut -d':' -f1)
+	EXTRA_DOCKER_ARGS += -v $(LOCAL_GOPATH)/pkg/mod:/go/pkg/mod:rw
+endif
+endif
 endif
 
 DOCKER_RUN := mkdir -p .go-pkg-cache && \
@@ -172,7 +177,7 @@ LIBCALICO_OLDVER?=$(shell go list -m -f "{{.Version}}" github.com/projectcalico/
 ## Update libcalico pin in go.mod
 update-libcalico:
 	$(DOCKER_RUN) -i $(CALICO_BUILD) sh -c '\
-	if [ $(LIBCALICO_VERSION) != $(LIBCALICO_OLDVER) ]; then \
+	if [[ ! -z "$(LIBCALICO_VERSION)" ]] && [[ "$(LIBCALICO_VERSION)" != "$(LIBCALICO_OLDVER)" ]]; then \
 		echo "Updating libcalico version $(LIBCALICO_OLDVER) to $(LIBCALICO_VERSION) from $(LIBCALICO_REPO)"; \
 		go mod edit -droprequire github.com/projectcalico/libcalico-go; \
 		go get $(LIBCALICO_REPO)@$(LIBCALICO_VERSION); \
@@ -180,6 +185,17 @@ update-libcalico:
 			go mod edit -replace github.com/projectcalico/libcalico-go=$(LIBCALICO_REPO)@$(LIBCALICO_VERSION); \
 		fi;\
 	fi'
+
+git-status:
+	git status --porcelain
+
+git-commit:
+	git diff-index --quiet HEAD || git commit -m "Semaphore Automatic Update" --author "Semaphore Automatic Update <marvin@tigera.io>" go.mod go.sum
+
+git-push:
+	git push
+
+commit-pin-updates: update-typha git-status ci git-commit git-push
 
 bin/kube-controllers-linux-$(ARCH): local_build $(SRC_FILES)
 	mkdir -p bin
