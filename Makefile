@@ -195,7 +195,7 @@ git-commit:
 git-push:
 	git push
 
-commit-pin-updates: update-typha git-status ci git-commit git-push
+commit-pin-updates: update-libcalico git-status ci git-commit git-push
 
 bin/kube-controllers-linux-$(ARCH): local_build $(SRC_FILES)
 	mkdir -p bin
