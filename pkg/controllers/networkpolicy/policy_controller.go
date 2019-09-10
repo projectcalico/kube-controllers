@@ -50,12 +50,18 @@ type policyController struct {
 	ctx           context.Context
 }
 
-// NewPolicyController returns a controller which manages NetworkPolicy objects.
-func NewPolicyController(ctx context.Context, clientset *kubernetes.Clientset, c client.Interface) controller.Controller {
-	policyConverter := converter.NewPolicyConverter()
+const dynamicLabel = "projectcalico.org/dynamic-networkpolicy"
 
+// NewPolicyController returns a controller which manages NetworkPolicy objects.
+func NewPolicyController(ctx context.Context, clientset kubernetes.Interface, c client.Interface) controller.Controller {
 	// Create a NetworkPolicy watcher.
 	listWatcher := cache.NewListWatchFromClient(clientset.NetworkingV1().RESTClient(), "networkpolicies", "", fields.Everything())
+
+	return newPolicyController(ctx, listWatcher, c)
+}
+
+func newPolicyController(ctx context.Context, listWatcher cache.ListerWatcher, c client.Interface) controller.Controller {
+	policyConverter := converter.NewPolicyConverter()
 
 	// Function returns map of policyName:policy stored by policy controller
 	// in datastore.
@@ -89,11 +95,24 @@ func NewPolicyController(ctx context.Context, clientset *kubernetes.Clientset, c
 	}
 	ccache := rcache.NewResourceCache(cacheArgs)
 
+	var indexer cache.Indexer
+	var informer cache.Controller
+
 	// Bind the Calico cache to kubernetes cache with the help of an informer. This way we make sure that
 	// whenever the kubernetes cache is updated, changes get reflected in the Calico cache as well.
-	_, informer := cache.NewIndexerInformer(listWatcher, &networkingv1.NetworkPolicy{}, 0, cache.ResourceEventHandlerFuncs{
+	// No calico policy updates will actually be queued until we have fully synced from k8s, therefore
+	// it's okay for us to produce a policy and then change it later in the initial sync.
+	indexer, informer = cache.NewIndexerInformer(listWatcher, &networkingv1.NetworkPolicy{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			log.Debugf("Got ADD event for network policy: %#v", obj)
+
+			if _, ok := obj.(*networkingv1.NetworkPolicy).Labels[dynamicLabel]; ok {
+				toCombine, _ := indexer.Index("combiner", obj)
+				combined := combinePolicies(interfacesToNetPols(toCombine)...)
+				obj = combined
+				log.Debugf("Create/updating dynamic network policy %s.", combined.Name)
+			}
+
 			policy, err := policyConverter.Convert(obj)
 			if err != nil {
 				log.WithError(err).Errorf("Error while converting %#v to calico network policy.", obj)
@@ -108,6 +127,66 @@ func NewPolicyController(ctx context.Context, clientset *kubernetes.Clientset, c
 			log.Debugf("Got UPDATE event for NetworkPolicy.")
 			log.Debugf("Old object: \n%#v\n", oldObj)
 			log.Debugf("New object: \n%#v\n", newObj)
+
+			oldNP := oldObj.(*networkingv1.NetworkPolicy)
+			newNP := newObj.(*networkingv1.NetworkPolicy)
+
+			_, newHasLabel := newNP.Labels[dynamicLabel]
+			_, oldHasLabel := oldNP.Labels[dynamicLabel]
+
+			switch {
+			case newHasLabel && !oldHasLabel:
+				// we are now part of a dynamic network policy, but weren't before
+				// we need to delete the old non-dynamic policy
+				log.Debugf("Deleting non-dynamic network policy %s due to dynamic label addition.", oldNP.Name)
+				oldPolicy, err := policyConverter.Convert(oldObj)
+				if err != nil {
+					log.WithError(err).Errorf("Error converting to Calico policy.")
+					return
+				}
+
+				oldK := policyConverter.GetKey(oldPolicy)
+				ccache.Delete(oldK)
+
+				fallthrough
+			case newHasLabel:
+				toCombine, _ := indexer.Index("combiner", newNP)
+				combined := combinePolicies(interfacesToNetPols(toCombine)...)
+				newObj = combined
+				log.Debugf("Updating dynamic network policy %s.", combined.Name)
+			case !newHasLabel && oldHasLabel:
+				// we were part of a dynamic network policy before, but no longer
+				toCombine, _ := indexer.Index("combiner", oldNP)
+				if len(toCombine) > 0 {
+					// we need to update the dynamic network policy
+					combined := combinePolicies(interfacesToNetPols(toCombine)...)
+					log.Debugf("Updating dynamic network policy %s due to label removal.", combined.Name)
+
+					policy, err := policyConverter.Convert(combined)
+					if err != nil {
+						log.WithError(err).Errorf("Error converting to Calico policy.")
+						return
+					}
+
+					// Add to cache.
+					k := policyConverter.GetKey(policy)
+					ccache.Set(k, policy)
+				} else {
+					// we need to delete the dynamic network policy
+					oldCombined := combinePolicies(oldNP)
+					log.Debugf("Deleting dynamic network policy %s due to label removal.", oldCombined.Name)
+
+					policy, err := policyConverter.Convert(oldCombined)
+					if err != nil {
+						log.WithError(err).Errorf("Error converting to Calico policy.")
+						return
+					}
+
+					calicoKey := policyConverter.GetKey(policy)
+					ccache.Delete(calicoKey)
+				}
+			}
+
 			policy, err := policyConverter.Convert(newObj)
 			if err != nil {
 				log.WithError(err).Errorf("Error converting to Calico policy.")
@@ -120,6 +199,37 @@ func NewPolicyController(ctx context.Context, clientset *kubernetes.Clientset, c
 		},
 		DeleteFunc: func(obj interface{}) {
 			log.Debugf("Got DELETE event for NetworkPolicy: %#v", obj)
+
+			if _, ok := obj.(*networkingv1.NetworkPolicy).Labels[dynamicLabel]; ok {
+				// was part of a dynamic policy before deletion
+				// toCombine will hold other elements with the same label, but not the one being deleted
+				toCombine, _ := indexer.Index("combiner", obj)
+
+				if len(toCombine) > 0 {
+					// theres other components left in the dynamic network policy, so this is essentially an update
+					combined := combinePolicies(interfacesToNetPols(toCombine)...)
+					log.Debugf("Updating dynamic network policy %s due to deletion.", combined.Name)
+
+					policy, err := policyConverter.Convert(combined)
+					if err != nil {
+						log.WithError(err).Errorf("Error converting to Calico policy.")
+						return
+					}
+
+					// Add to cache.
+					k := policyConverter.GetKey(policy)
+					ccache.Set(k, policy)
+
+					return
+				}
+
+				// ok, there's no other components in the dynamic network policy, lets figure out what it was and delete it
+				combined := combinePolicies(obj.(*networkingv1.NetworkPolicy))
+				// this was the last component of the dynamic network policy, lets delete it
+				obj = combined
+				log.Debugf("Deleting dynamic network policy %s.", combined.Name)
+			}
+
 			policy, err := policyConverter.Convert(obj)
 			if err != nil {
 				log.WithError(err).Errorf("Error converting to Calico policy.")
@@ -129,7 +239,7 @@ func NewPolicyController(ctx context.Context, clientset *kubernetes.Clientset, c
 			calicoKey := policyConverter.GetKey(policy)
 			ccache.Delete(calicoKey)
 		},
-	}, cache.Indexers{})
+	}, cache.Indexers{"combiner": combinerIndexFunc})
 
 	return &policyController{informer, ccache, c, ctx}
 }
