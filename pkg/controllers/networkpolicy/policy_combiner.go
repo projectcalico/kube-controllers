@@ -46,6 +46,9 @@ func combinePolicies(nps ...*networkingv1.NetworkPolicy) *networkingv1.NetworkPo
 		base.Spec.Egress = append(base.Spec.Egress, np.Spec.Egress...)
 	}
 
+	base.Spec.Ingress = combineIngressRules(base.Spec.Ingress...)
+	base.Spec.Egress = combineEgressRules(base.Spec.Egress...)
+
 	return base
 }
 

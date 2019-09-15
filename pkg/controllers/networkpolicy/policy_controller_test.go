@@ -189,10 +189,10 @@ var _ = Describe("Informer", func() {
 		obj, ok := c.resourceCache.Get(dynamicName)
 		Expect(ok).To(BeTrue())
 
-		initialPolicy := *combinedPolicies
+		initialPolicy := combinedPolicies.DeepCopy()
 		initialPolicy.Spec.Ingress = initialPolicy.Spec.Ingress[:1]
 
-		Expect(obj).To(Equal(mustConvert(&initialPolicy)))
+		Expect(obj).To(Equal(mustConvert(initialPolicy)))
 
 		// add the second
 		fakeWatch.Add(examplePolicy2)
@@ -210,7 +210,7 @@ var _ = Describe("Informer", func() {
 		obj, ok = c.resourceCache.Get(dynamicName)
 		Expect(ok).To(BeTrue())
 
-		Expect(obj).To(Equal(mustConvert(&initialPolicy)))
+		Expect(obj).To(Equal(mustConvert(initialPolicy)))
 
 		// delete the first
 		fakeWatch.Delete(examplePolicy)
@@ -228,27 +228,27 @@ var _ = Describe("Informer", func() {
 
 		dynamicName := c.resourceCache.ListKeys()[0]
 
-		updatedPolicy := *examplePolicy2
+		updatedPolicy := examplePolicy2.DeepCopy()
 		updatedPolicy.Spec.Ingress[0].From[0].PodSelector = &metav1.LabelSelector{
 			MatchLabels: map[string]string{
-				"bar": "baz",
+				"bil": "baz",
 			},
 		}
 
-		fakeWatch.Modify(&updatedPolicy)
+		fakeWatch.Modify(updatedPolicy)
 		<-processed
 
 		obj, ok := c.resourceCache.Get(dynamicName)
 		Expect(ok).To(BeTrue())
 
-		combinedUpdated := *combinedPolicies
+		combinedUpdated := combinedPolicies.DeepCopy()
 		combinedUpdated.Spec.Ingress[1].From[0].PodSelector = &metav1.LabelSelector{
 			MatchLabels: map[string]string{
-				"bar": "baz",
+				"bil": "baz",
 			},
 		}
 
-		Expect(obj).To(Equal(mustConvert(&combinedUpdated)))
+		Expect(obj).To(Equal(mustConvert(combinedUpdated)))
 	})
 
 	It("should correctly account for policy updates that change a dynamic label", func() {
@@ -259,11 +259,11 @@ var _ = Describe("Informer", func() {
 
 		dynamicName := c.resourceCache.ListKeys()[0]
 
-		updatedPolicy2 := *examplePolicy2
+		updatedPolicy2 := examplePolicy2.DeepCopy()
 		updatedPolicy2.Labels = map[string]string{}
 
 		// we remove the dynamic label of policy2
-		fakeWatch.Modify(&updatedPolicy2)
+		fakeWatch.Modify(updatedPolicy2)
 		// handle the dynamic policy update
 		Expect(<-processed).To(Equal("knp.default.s-foo"))
 		// handle the nondynamic2 policy creation
@@ -281,11 +281,11 @@ var _ = Describe("Informer", func() {
 		Expect(nonDynamicObj2).To(Equal(mustConvert(examplePolicy2)))
 
 		// ok lets remove the policy one label
-		updatedPolicy := *examplePolicy
+		updatedPolicy := examplePolicy.DeepCopy()
 		updatedPolicy.Labels = map[string]string{}
 
 		// we remove the dynamic label of policy2
-		fakeWatch.Modify(&updatedPolicy)
+		fakeWatch.Modify(updatedPolicy)
 		// handle the dynamic policy deletion
 		Expect(<-processed).To(Equal("knp.default.s-foo"))
 		// handle the nondynamic1 policy creation
@@ -343,7 +343,6 @@ var _ = Describe("Informer", func() {
 		obj, ok = c.resourceCache.Get(dynamicName)
 		Expect(ok).To(BeTrue())
 
-		// dynamic policy contains only policy1 stuff
 		Expect(obj).To(Equal(mustConvert(combinedPolicies)))
 	})
 })
