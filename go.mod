@@ -13,12 +13,12 @@ require (
 	github.com/onsi/gomega v1.5.0
 	github.com/patrickmn/go-cache v0.0.0-20180815053127-5633e0862627
 	github.com/projectcalico/felix v0.0.0-20190910002408-d60a3c648288
-	github.com/projectcalico/libcalico-go v0.0.0-20190918012520-5129d8f8aff0
+	github.com/projectcalico/libcalico-go v0.0.0-20191007235924-bda281e2d6ef
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/pflag v1.0.3
-	k8s.io/api v0.0.0-20190419092548-c5cad27821f6
-	k8s.io/apimachinery v0.0.0-20190419212445-b874eabb9a4e
+	k8s.io/api v0.0.0-20191003000013-35e20aa79eb8
+	k8s.io/apimachinery v0.0.0-20190913080033-27d36303b655
 	k8s.io/apiserver v0.0.0-20190423173055-cc449ec47086
 	k8s.io/client-go v11.0.1-0.20190409021438-1a26190bd76a+incompatible
 	k8s.io/klog v0.4.0
