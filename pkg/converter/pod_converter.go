@@ -33,6 +33,7 @@ type WorkloadEndpointData struct {
 	PodName   string
 	Namespace string
 	Labels    map[string]string
+	FloatingIPs map[string]string
 }
 
 type podConverter struct {
@@ -45,6 +46,7 @@ func BuildWorkloadEndpointData(wep api.WorkloadEndpoint) WorkloadEndpointData {
 		PodName:   wep.Spec.Pod,
 		Namespace: wep.Namespace,
 		Labels:    wep.Labels,
+		FloatingIPs: wep.FloatingIPs,
 	}
 }
 
@@ -84,6 +86,7 @@ func (p *podConverter) Convert(k8sObj interface{}) (interface{}, error) {
 	}
 
 	kvp, err := c.PodToWorkloadEndpoint(pod)
+
 	if err != nil {
 		return nil, err
 	}
