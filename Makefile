@@ -156,18 +156,13 @@ endif
 
 ## Removes all build artifacts.
 clean:
-        rm -rf .go-pkg-cache \
-                bin \
-                image.created-$(ARCH) \
-                build \
-                report/*.xml \
-                release-notes-*
-        -docker rmi $(BUILD_IMAGE)
-        -docker rmi $(BUILD_IMAGE):latest-amd64
-        -docker rmi $(FLANNEL_MIGRATION_BUILD_IMAGE)
-        -docker rmi $(FLANNEL_MIGRATION_BUILD_IMAGE):latest-amd64
-        rm -f tests/fv/fv.test
-        rm -f report/*.xml
+	rm -rf .go-pkg-cache bin image.created-$(ARCH) build report/*.xml release-notes-*
+	-docker rmi $(BUILD_IMAGE)
+ 	-docker rmi $(BUILD_IMAGE):latest-amd64
+	-docker rmi $(FLANNEL_MIGRATION_BUILD_IMAGE)
+	-docker rmi $(FLANNEL_MIGRATION_BUILD_IMAGE):latest-amd64
+	rm -f tests/fv/fv.test
+	rm -f report/*.xml
         rm -f tests/crds.yaml
 
 ###############################################################################
