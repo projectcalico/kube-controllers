@@ -13,6 +13,7 @@ require (
 	github.com/patrickmn/go-cache v0.0.0-20180815053127-5633e0862627
 	github.com/projectcalico/felix v0.0.0-20190909220014-9e5ec5eca469
 	github.com/projectcalico/libcalico-go v0.0.0-20191115193732-24505bb8ceab
+	github.com/rafaelvanoni/kube-controllers v3.8.4+incompatible // indirect
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/pflag v1.0.3
