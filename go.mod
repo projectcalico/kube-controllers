@@ -11,12 +11,14 @@ require (
 	github.com/onsi/ginkgo v1.10.1
 	github.com/onsi/gomega v1.7.0
 	github.com/patrickmn/go-cache v0.0.0-20180815053127-5633e0862627
-	github.com/projectcalico/felix v0.0.0-20190909220014-9e5ec5eca469
-	github.com/projectcalico/libcalico-go v0.0.0-20191119183141-c072e7a2fae4
+	github.com/projectcalico/felix v0.0.0-20191122063206-5ef23057d939
+	github.com/projectcalico/go-yaml v0.0.0-20161201183616-955bc3e451ef // indirect
+	github.com/projectcalico/libcalico-go v1.7.2-0.20191122034129-d601846715fa
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/pflag v1.0.3
 	gopkg.in/inf.v0 v0.9.1 // indirect
+	gopkg.in/yaml.v1 v1.0.0-20140924161607-9f9df34309c0 // indirect
 	k8s.io/api v0.0.0-20191005115622-2e41325d9e4b
 	k8s.io/apimachinery v0.0.0-20191006235458-f9f2f3f8ab02
 	k8s.io/apiserver v0.0.0-20191008120233-c29386a6051d
