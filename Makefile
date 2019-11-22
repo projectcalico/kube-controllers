@@ -36,7 +36,7 @@ include Makefile.common
 ###############################################################################
 
 HYPERKUBE_IMAGE?=gcr.io/google_containers/hyperkube-$(ARCH):$(K8S_VERSION)
-ETCD_IMAGE?=quay.io/coreos/etcd:$(ETCD_VERSION)-$(BUILDARCH)
+ETCD_IMAGE?=quay.io/coreos/etcd:$(ETCD_VERSION)
 
 # Makefile configuration options
 BUILD_IMAGE?=calico/kube-controllers
