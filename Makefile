@@ -68,7 +68,7 @@ update-pins: update-libcalico-pin update-felix-pin
 ###############################################################################
 # Building the binary
 ###############################################################################
-build: bin/kube-controllers-linux-$(ARCH) bin/check-status-linux-$(ARCH)
+build: bin/kube-controllers-linux-$(ARCH) bin/check-status-linux-$(ARCH) bin/kubectl-$(ARCH)
 build-all: $(addprefix sub-build-,$(VALIDARCHES))
 sub-build-%:
 	$(MAKE) build ARCH=$*
