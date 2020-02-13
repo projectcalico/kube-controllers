@@ -15,6 +15,10 @@
 package node
 
 import (
+	"context"
+	"encoding/json"
+	"time"
+
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
@@ -22,6 +26,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -75,12 +80,13 @@ func (c *NodeController) handleNewNode(u bapi.Update) {
 					InterfaceName: "*",
 				},
 			}
-			_, err := c.calicoClient.HostEndpoints().Create(c.ctx, hep, options.SetOptions{})
+			h, err := c.calicoClient.HostEndpoints().Create(c.ctx, hep, options.SetOptions{})
 			// TODO: we should retry here a few times.
 			if err != nil {
 				logrus.Warnf("error creating host endpoint for new node %q: %v", n.Name, err.Error())
 				return
 			}
+			logrus.Debugf("created hep for new node: %#v", h)
 			logrus.Infof("created hep for new node %q", n.Name)
 			return
 		default:
@@ -104,9 +110,12 @@ func (c *NodeController) deleteHEP(nodeName string) {
 			logrus.Warnf("could not delete host endpoint for node %q because it does not exist", nodeName)
 			return
 		default:
-			// TODO: retry for other errors
+			logrus.Warnf("could not delete host endpoint for node %q: %v", nodeName, err)
+			return
 		}
 	}
+
+	logrus.Infof("deleted host endpoint for node %q", nodeName)
 }
 
 func (c *NodeController) OnUpdates(updates []bapi.Update) {
@@ -160,4 +169,100 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 			logrus.Errorf("Unhandled update type")
 		}
 	}
+}
+
+// syncNodeLabels syncs the labels found in v1.Node to the Calico node object.
+// It uses an annotation on the Calico node object to keep track of which labels have
+// been synced from Kubernetes, so that it doesn't overwrite user provided labels (e.g.,
+// via calicoctl or another Calico controller).
+// sync labels from a Calico node object to HEP
+func (nc *NodeController) syncHEPLabels(nodeName string) {
+	// On failure, we retry a certain number of times.
+	for n := 1; n < 5; n++ {
+		// Get the Calico node representation.
+		nc.nodemapLock.Lock()
+		name, ok := nc.nodemapper[nodeName]
+		nc.nodemapLock.Unlock()
+		if !ok {
+			// We havent learned this Calico node yet.
+			log.Debugf("Skipping update for node with no Calico equivalent")
+			return
+		}
+		calNode, err := nc.calicoClient.Nodes().Get(nc.ctx, name, options.GetOptions{})
+		if err != nil {
+			log.WithError(err).Warnf("Failed to get node, retrying")
+			time.Sleep(retrySleepTime)
+			continue
+		}
+
+		hep, err := nc.calicoClient.HostEndpoints().Get(nc.ctx, nodeName, options.GetOptions{})
+		if err != nil {
+			log.WithError(err).Warnf("Failed to get host endpoint, retrying")
+			time.Sleep(retrySleepTime)
+			continue
+		}
+
+		if hep.Labels == nil {
+			hep.Labels = make(map[string]string)
+		}
+		if hep.Annotations == nil {
+			hep.Annotations = make(map[string]string)
+		}
+
+		// Track if we need to perform an update.
+		needsUpdate := false
+
+		// If there are labels present, then parse them. Otherwise this is
+		// a first-time sync, in which case there are no old labels.
+		oldLabels := make(map[string]string)
+		if a, ok := hep.Annotations[hepLabelAnnotation]; ok {
+			if err = json.Unmarshal([]byte(a), &oldLabels); err != nil {
+				log.WithError(err).Error("failed to unmarshal hep labels")
+				return
+			}
+		}
+		log.Debugf("determined previously synced labels: %s", oldLabels)
+
+		// We've synced labels before. Determine diffs to apply.
+		// For each k/v in calico node labels, if it isn't present or the value
+		// differs, add it to the hep.
+		for k, v := range calNode.Labels {
+			if v2, ok := hep.Labels[k]; !ok || v != v2 {
+				log.Debugf("adding hep label %s=%s", k, v)
+				hep.Labels[k] = v
+				needsUpdate = true
+			}
+		}
+
+		// For each k/v that used to be in the Calico node labels, but is no longer,
+		// remove it from the Calico node.
+		for k, v := range oldLabels {
+			if _, ok := calNode.Labels[k]; !ok {
+				// The old label is no longer present. Remove it.
+				log.Debugf("deleting hep label %s=%s", k, v)
+				delete(hep.Labels, k)
+				needsUpdate = true
+			}
+		}
+
+		// Set the annotation to the correct values.
+		bytes, err := json.Marshal(hep.Labels)
+		if err != nil {
+			log.WithError(err).Errorf("Error marshalling node labels")
+			return
+		}
+		hep.Annotations[hepLabelAnnotation] = string(bytes)
+
+		// Update the hep in the datastore.
+		if needsUpdate {
+			if _, err := nc.calicoClient.HostEndpoints().Update(context.Background(), hep, options.SetOptions{}); err != nil {
+				log.WithError(err).Warnf("failed to update host endpoint, retrying")
+				time.Sleep(retrySleepTime)
+				continue
+			}
+			log.WithField("hostendpoint", calNode.ObjectMeta.Name).Info("successfully synced hostendpoint labels")
+		}
+		return
+	}
+	log.Errorf("Too many retries when updating node")
 }

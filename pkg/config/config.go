@@ -47,7 +47,7 @@ type Config struct {
 	SyncNodeLabels bool `default:"true" split_words:"true"`
 
 	// Enable creating hostendpoints for nodes
-	AutoHostEndpoints string `default:"enabled"`
+	AutoHostEndpoints string `default:"disabled"`
 
 	// etcdv3 or kubernetes
 	DatastoreType string `default:"etcdv3" split_words:"true"`

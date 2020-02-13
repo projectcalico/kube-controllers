@@ -32,13 +32,19 @@ import (
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
+	"github.com/projectcalico/libcalico-go/lib/options"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
 	RateLimitCalicoList   = "calico-list"
 	RateLimitK8s          = "k8s"
+	RateLimitCalicoCreate = "calico-create"
 	RateLimitCalicoDelete = "calico-delete"
 	nodeLabelAnnotation   = "projectcalico.org/kube-labels"
+	hepLabelAnnotation    = "projectcalico.org/node-labels"
+	hepCreatedLabelKey    = "projetcalico.org/created-by"
+	hepCreatedLabelValue  = "calico-kube-controllers"
 )
 
 var (
@@ -167,6 +173,10 @@ func (c *NodeController) acceptScheduleRequests(stopCh <-chan struct{}) {
 				// reschedule immediately.
 				kick(c.schedule)
 			}
+			err = c.syncHEPs()
+			if err != nil {
+				kick(c.schedule)
+			}
 		case <-stopCh:
 			return
 		}
@@ -180,6 +190,84 @@ func (c *NodeController) syncDelete() error {
 		return c.syncDeleteKDD()
 	}
 	return c.syncDeleteEtcd()
+}
+
+func (c *NodeController) syncHEPs() error {
+	log.Debug("syncing HEPs")
+	time.Sleep(c.rl.When(RateLimitCalicoList))
+	ns, err := c.calicoClient.Nodes().List(c.ctx, options.ListOptions{})
+	if err != nil {
+		log.Infof("could not list nodes: %v", err)
+		return err
+	}
+	hs, err := c.calicoClient.HostEndpoints().List(c.ctx, options.ListOptions{})
+	if err != nil {
+		log.Infof("could not list host endpoints: %v", err)
+		return err
+	}
+	c.rl.Forget(RateLimitCalicoList)
+
+	hm := make(map[string]api.HostEndpoint)
+	for _, h := range hs.Items {
+		if v, ok := h.Labels[hepCreatedLabelKey]; ok && v == hepCreatedLabelValue {
+			hm[h.Name] = h
+		}
+	}
+
+	nm := make(map[string]api.Node)
+	for _, n := range ns.Items {
+		nm[n.Name] = n
+	}
+
+	// Go through current nodes, creating heps for them if they don't exist.
+	for _, n := range ns.Items {
+		if _, ok := hm[n.Name]; !ok {
+			// Create a set of labels from the node labels and include the
+			// special label marking the hep as created by us.
+			hepLabels := make(map[string]string, len(n.Labels))
+			hepLabels[hepCreatedLabelKey] = hepCreatedLabelValue
+			for k, v := range n.Labels {
+				hepLabels[k] = v
+			}
+			hep := &api.HostEndpoint{
+				TypeMeta: metav1.TypeMeta{Kind: "HostEndpoint", APIVersion: "v3"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   n.Name,
+					Labels: hepLabels,
+				},
+				Spec: api.HostEndpointSpec{
+					Node:          n.Name,
+					InterfaceName: "*",
+				},
+			}
+			time.Sleep(c.rl.When(RateLimitCalicoCreate))
+			_, err := c.calicoClient.HostEndpoints().Create(c.ctx, hep, options.SetOptions{})
+			if err != nil {
+				log.Warnf("could not create hostendpoint for node: %v", err)
+				return err
+			}
+			c.rl.Forget(RateLimitCalicoCreate)
+		}
+	}
+
+	// Now go through the current host endpoints. If the hep has the special
+	// label signifying it was created by kube-controllers but the hep doesn't
+	// correspond to a current node, then we remove it.
+	for _, h := range hs.Items {
+		_, isAutoHep := h.Labels[hepCreatedLabelKey]
+		_, hepHasNode := nm[h.Name]
+		if isAutoHep && !hepHasNode {
+			time.Sleep(c.rl.When(RateLimitCalicoDelete))
+			_, err := c.calicoClient.HostEndpoints().Delete(c.ctx, h.Name, options.DeleteOptions{})
+			if err != nil {
+				log.Warnf("could not delete unused hostendpoint %q: %v", h.Name, err)
+				return err
+			}
+			c.rl.Forget(RateLimitCalicoDelete)
+		}
+	}
+
+	return nil
 }
 
 // kick puts an item on the channel in non-blocking write. This means if there
