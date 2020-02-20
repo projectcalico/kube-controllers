@@ -208,7 +208,7 @@ func isAutoHostendpoint(h *api.HostEndpoint) bool {
 func (c *NodeController) createHostendpoint(n *api.Node) (*api.HostEndpoint, error) {
 	// Create a set of labels from the node labels and include the
 	// special label marking the hep as created by us.
-	hepLabels := make(map[string]string, len(n.Labels))
+	hepLabels := make(map[string]string, len(n.Labels)+1)
 	hepLabels[hepCreatedLabelKey] = hepCreatedLabelValue
 	for k, v := range n.Labels {
 		hepLabels[k] = v
