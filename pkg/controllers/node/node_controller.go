@@ -45,7 +45,7 @@ const (
 	RateLimitCalicoDelete = "calico-delete"
 	nodeLabelAnnotation   = "projectcalico.org/kube-labels"
 	hepLabelAnnotation    = "projectcalico.org/node-labels"
-	hepCreatedLabelKey    = "projetcalico.org/created-by"
+	hepCreatedLabelKey    = "projectcalico.org/created-by"
 	hepCreatedLabelValue  = "calico-kube-controllers"
 )
 
@@ -205,7 +205,7 @@ func isAutoHostendpoint(h *api.HostEndpoint) bool {
 }
 
 // createHostendpoint creates an auto hostendpoint for the specified node.
-func (c *NodeController) createHostendpoint(n *api.Node) error {
+func (c *NodeController) createHostendpoint(n *api.Node) (*api.HostEndpoint, error) {
 	// Create a set of labels from the node labels and include the
 	// special label marking the hep as created by us.
 	hepLabels := make(map[string]string, len(n.Labels))
@@ -227,13 +227,13 @@ func (c *NodeController) createHostendpoint(n *api.Node) error {
 	}
 
 	time.Sleep(c.rl.When(RateLimitCalicoCreate))
-	_, err := c.calicoClient.HostEndpoints().Create(c.ctx, hep, options.SetOptions{})
+	res, err := c.calicoClient.HostEndpoints().Create(c.ctx, hep, options.SetOptions{})
 	if err != nil {
 		log.Warnf("could not create hostendpoint for node: %v", err)
-		return err
+		return nil, err
 	}
 	c.rl.Forget(RateLimitCalicoCreate)
-	return nil
+	return res, nil
 }
 
 // syncAllHostendpoints syncs all Calico nodes with their hostendpoints.
@@ -270,7 +270,7 @@ func (c *NodeController) syncAllHostendpoints() {
 		// Go through current nodes, creating hostendpoints for them if they don't exist.
 		for _, n := range nodesList.Items {
 			if _, ok := heps[n.Name]; !ok {
-				err = c.createHostendpoint(&n)
+				_, err = c.createHostendpoint(&n)
 				if err != nil {
 					log.WithError(err).Info("could not create hostendpoint, retrying")
 					time.Sleep(retrySleepTime)
@@ -341,7 +341,7 @@ func (c *NodeController) syncHostendpointLabels(nodeName string) {
 			switch err.(type) {
 			case errors.ErrorResourceDoesNotExist:
 				log.Infof("host endpoint %q doesn't exist, creating...", nodeName)
-				err = c.createHostendpoint(calNode)
+				hep, err = c.createHostendpoint(calNode)
 				if err != nil {
 					log.WithError(err).Warnf("failed to create host endpoint %q, retrying", nodeName)
 					time.Sleep(retrySleepTime)
