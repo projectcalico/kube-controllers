@@ -190,13 +190,13 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 			time.Second*2, 500*time.Millisecond).Should(BeNil())
 	})
 
-	It("should clean up dangling hostendpoints", func() {
+	It("should clean up dangling hostendpoints and create heps for nodes without them", func() {
 		// Create a wildcard HEP that matches what might have been created
 		// automatically by kube-controllers. But we won't have a corresponding
 		// node for this HEP.
 		hep := &api.HostEndpoint{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "testnode",
+				Name: "testnode-auto-hep",
 				Labels: map[string]string{
 					"projectcalico.org/created-by": "calico-kube-controllers",
 				},
@@ -210,12 +210,74 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		_, err := c.HostEndpoints().Create(context.Background(), hep, options.SetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
+		// Create another wildcard HEP but this one isn't managed by Calico.
+		hep2 := &api.HostEndpoint{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "user-managed-hep",
+				Labels: map[string]string{
+					"env": "staging",
+				},
+			},
+			Spec: api.HostEndpointSpec{
+				Node:          "testnode",
+				InterfaceName: "*",
+			},
+		}
+		_, err = c.HostEndpoints().Create(context.Background(), hep2, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create a kubernetes node
+		kn := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: kNodeName,
+				Labels: map[string]string{
+					"label1": "value1",
+				},
+			},
+		}
+		_, err = k8sClient.CoreV1().Nodes().Create(kn)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create a Calico node with a reference to it.
+		cn := api.NewNode()
+		cn.Name = cNodeName
+		cn.Spec = api.NodeSpec{
+			BGP: &api.NodeBGPSpec{
+				IPv4Address:        "172.16.1.1",
+				IPv4IPIPTunnelAddr: "192.168.100.1",
+			},
+			OrchRefs: []api.OrchRef{
+				{
+					NodeName:     kNodeName,
+					Orchestrator: "k8s",
+				},
+			},
+		}
+		_, err = c.Nodes().Create(context.Background(), cn, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
 		// Run the controller now.
 		runController()
 
-		// Expect the hostendpoint for the node to be deleted when all
-		// hostendpoints are synced.
-		Eventually(func() error { return testutils.ExpectHostendpointDeleted(c, "testnode") },
+		// Expect the dangling hostendpoint to be deleted.
+		Eventually(func() error { return testutils.ExpectHostendpointDeleted(c, "testnode-auto-hep") },
 			time.Second*2, 500*time.Millisecond).Should(BeNil())
+
+		// Expect the user's own hostendpoints to still exist.
+		var userHep *api.HostEndpoint
+		Eventually(func() *api.HostEndpoint {
+			userHep, _ = c.HostEndpoints().Get(context.Background(), "user-managed-hep", options.GetOptions{})
+			return userHep
+		}, time.Second*2, 500*time.Millisecond).ShouldNot(BeNil())
+		Expect(userHep.Labels).To(BeEquivalentTo(hep2.Labels))
+		Expect(userHep.Spec.Node).To(Equal(hep2.Spec.Node))
+		Expect(userHep.Spec.InterfaceName).To(Equal(hep2.Spec.InterfaceName))
+
+		var autoHep *api.HostEndpoint
+		autoHepName := cNodeName + "-auto-hep"
+		Eventually(func() *api.HostEndpoint {
+			autoHep, _ = c.HostEndpoints().Get(context.Background(), autoHepName, options.GetOptions{})
+			return autoHep
+		}, time.Second*2, 500*time.Millisecond).ShouldNot(BeNil())
 	})
 })
