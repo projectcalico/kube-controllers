@@ -45,7 +45,6 @@ const (
 	RateLimitCalicoCreate = "calico-create"
 	RateLimitCalicoDelete = "calico-delete"
 	nodeLabelAnnotation   = "projectcalico.org/kube-labels"
-	hepLabelAnnotation    = "projectcalico.org/node-labels"
 	hepCreatedLabelKey    = "projectcalico.org/created-by"
 	hepCreatedLabelValue  = "calico-kube-controllers"
 )
@@ -267,14 +266,10 @@ func (c *NodeController) syncAllHostendpoints() {
 			nodes[n.Name] = n
 		}
 
-		// Now go through the current host endpoints. If the hep has the special
-		// label signifying it was created by kube-controllers but the hep doesn't
-		// correspond to a current node, then we remove it.
-		for _, h := range hepsList.Items {
-			_, isAutoHep := h.Labels[hepCreatedLabelKey]
-			_, hepHasNode := nodes[h.Name]
-
-			if isAutoHep && !hepHasNode {
+		// Now go through the current host endpoints. If the hep doesn't
+		// correspond to a current node then we remove it.
+		for k, h := range heps {
+			if _, ok := nodes[h.Name]; !ok {
 				time.Sleep(c.rl.When(RateLimitCalicoDelete))
 				_, err := c.calicoClient.HostEndpoints().Delete(c.ctx, h.Name, options.DeleteOptions{})
 				if err != nil {
@@ -282,6 +277,7 @@ func (c *NodeController) syncAllHostendpoints() {
 					time.Sleep(retrySleepTime)
 					continue
 				}
+				delete(heps, k)
 			}
 		}
 
@@ -298,7 +294,6 @@ func (c *NodeController) syncAllHostendpoints() {
 			}
 		}
 	}
-
 }
 
 // kick puts an item on the channel in non-blocking write. This means if there
@@ -314,22 +309,24 @@ func kick(c chan<- interface{}) {
 }
 
 // generateHostendpointName returns the auto hostendpoint's name.
-func (c *NodeController) generateHostendpointName(n *api.Node) string {
-	return fmt.Sprintf("%s-auto-hep", n.Name)
+func (c *NodeController) generateHostendpointName(nodeName string) string {
+	return fmt.Sprintf("%s-auto-hep", nodeName)
 }
 
 // getHostendpointExpectedIPs returns all of the known IPs on the node resource
 // that should set on the auto hostendpoint.
 func (c *NodeController) getHostendpointExpectedIPs(node *api.Node) []string {
 	expectedIPs := []string{}
-	if node.Spec.BGP.IPv4Address != "" {
-		expectedIPs = append(expectedIPs, node.Spec.BGP.IPv4Address)
-	}
-	if node.Spec.BGP.IPv6Address != "" {
-		expectedIPs = append(expectedIPs, node.Spec.BGP.IPv6Address)
-	}
-	if node.Spec.BGP.IPv4IPIPTunnelAddr != "" {
-		expectedIPs = append(expectedIPs, node.Spec.BGP.IPv4IPIPTunnelAddr)
+	if node.Spec.BGP != nil {
+		if node.Spec.BGP.IPv4Address != "" {
+			expectedIPs = append(expectedIPs, node.Spec.BGP.IPv4Address)
+		}
+		if node.Spec.BGP.IPv6Address != "" {
+			expectedIPs = append(expectedIPs, node.Spec.BGP.IPv6Address)
+		}
+		if node.Spec.BGP.IPv4IPIPTunnelAddr != "" {
+			expectedIPs = append(expectedIPs, node.Spec.BGP.IPv4IPIPTunnelAddr)
+		}
 	}
 	if node.Spec.IPv4VXLANTunnelAddr != "" {
 		expectedIPs = append(expectedIPs, node.Spec.IPv4VXLANTunnelAddr)
@@ -348,7 +345,7 @@ func (c *NodeController) generateHostendpointFromNode(node *api.Node) *api.HostE
 
 	return &api.HostEndpoint{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   c.generateHostendpointName(node),
+			Name:   c.generateHostendpointName(node.Name),
 			Labels: hepLabels,
 		},
 		Spec: api.HostEndpointSpec{
@@ -386,7 +383,8 @@ func (c *NodeController) syncHostendpoint(node *api.Node) {
 	// On failure, we retry a certain number of times.
 	for n := 0; n < 5; n++ {
 		// Try getting the host endpoint.
-		currentHep, err := c.calicoClient.HostEndpoints().Get(c.ctx, c.generateHostendpointName(node), options.GetOptions{})
+		hepName := c.generateHostendpointName(node.Name)
+		currentHep, err := c.calicoClient.HostEndpoints().Get(c.ctx, hepName, options.GetOptions{})
 		expectedHep := c.generateHostendpointFromNode(node)
 
 		// If the hostendpoint doesn't exist, create it.
@@ -421,11 +419,12 @@ func (c *NodeController) syncHostendpoint(node *api.Node) {
 
 // deleteHostendpoint deletes the auto hostendpoint associated with a node.
 func (c *NodeController) deleteHostendpoint(nodeName string) {
+	hepName := c.generateHostendpointName(nodeName)
 	// On failure, we retry a certain number of times.
 	for n := 0; n < 5; n++ {
-		hep, err := c.calicoClient.HostEndpoints().Get(c.ctx, nodeName, options.GetOptions{})
+		hep, err := c.calicoClient.HostEndpoints().Get(c.ctx, hepName, options.GetOptions{})
 		if err != nil {
-			log.WithError(err).Warnf("failed to get host endpoint %q, retrying", nodeName)
+			log.WithError(err).Warnf("failed to get host endpoint %q, retrying", hepName)
 			time.Sleep(retrySleepTime)
 			continue
 		}
@@ -433,26 +432,27 @@ func (c *NodeController) deleteHostendpoint(nodeName string) {
 		// If for some reason a hep exists with the node's name but it isn't
 		// managed by us, log and return.
 		if !isAutoHostendpoint(hep) {
-			log.WithError(err).Warnf("failed to delete hostendpoint %q because it is not managed by kube-controllers", nodeName)
+			log.WithError(err).Warnf("failed to delete hostendpoint %q because it is not managed by kube-controllers", hepName)
 			return
 		}
 
-		_, err = c.calicoClient.HostEndpoints().Delete(c.ctx, nodeName, options.DeleteOptions{})
+		_, err = c.calicoClient.HostEndpoints().Delete(c.ctx, hepName, options.DeleteOptions{})
 		if err != nil {
 			switch err.(type) {
 			// If the hostendpoint does not exist, we will retry anyways since
 			// the Calico node may have been created then deleted immediately
 			// afterwards such that the hostendpoint wasn't created yet.
 			case errors.ErrorResourceDoesNotExist:
-				log.Warnf("could not delete host endpoint for node %q because it does not exist, retrying", nodeName)
+				log.Warnf("could not delete host endpoint %q for node %q because it does not exist, retrying", hepName, nodeName)
 				continue
 			default:
 				log.Warnf("could not delete host endpoint for node %q: %v", nodeName, err)
 				continue
 			}
 		}
-		log.Infof("deleted hostendpoint for node %q", nodeName)
+		log.Infof("deleted hostendpoint %q for node %q", hepName, nodeName)
+		return
 	}
 
-	log.Errorf("too many retries when deleting hostendpoint %q", nodeName)
+	log.Errorf("too many retries when deleting hostendpoint %q", hepName)
 }
