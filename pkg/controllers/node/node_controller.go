@@ -394,14 +394,13 @@ func (c *NodeController) syncHostendpoint(node *api.Node) {
 	// On failure, we retry a certain number of times.
 	for n := 0; n < 5; n++ {
 		// Try getting the host endpoint.
-		currentHep, err := c.calicoClient.HostEndpoints().Get(c.ctx, hepName, options.GetOptions{})
 		expectedHep := c.generateHostendpointFromNode(node)
+		currentHep, err := c.calicoClient.HostEndpoints().Get(c.ctx, hepName, options.GetOptions{})
 
-		// If the hostendpoint doesn't exist, create it.
-		if currentHep == nil {
+		if err != nil {
 			switch err.(type) {
 			case errors.ErrorResourceDoesNotExist:
-				log.Infof("host endpoint %q doesn't exist, creating...", node.Name)
+				log.Infof("host endpoint %q doesn't exist, creating it", node.Name)
 				_, err = c.createHostendpoint(node)
 				if err != nil {
 					log.WithError(err).Warnf("failed to create host endpoint %q, retrying", node.Name)
