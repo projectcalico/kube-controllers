@@ -16,7 +16,8 @@ package node
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -123,7 +124,7 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	}
 
 	if nc.autoHostEndpoints {
-		nc.syncAllHostendpoints()
+		//nc.syncAllHostendpoints()
 	}
 
 	return nc
@@ -206,25 +207,7 @@ func isAutoHostendpoint(h *api.HostEndpoint) bool {
 
 // createHostendpoint creates an auto hostendpoint for the specified node.
 func (c *NodeController) createHostendpoint(n *api.Node) (*api.HostEndpoint, error) {
-	// Create a set of labels from the node labels and include the
-	// special label marking the hep as created by us.
-	hepLabels := make(map[string]string, len(n.Labels)+1)
-	hepLabels[hepCreatedLabelKey] = hepCreatedLabelValue
-	for k, v := range n.Labels {
-		hepLabels[k] = v
-	}
-
-	hep := &api.HostEndpoint{
-		TypeMeta: metav1.TypeMeta{Kind: "HostEndpoint", APIVersion: "v3"},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   n.Name,
-			Labels: hepLabels,
-		},
-		Spec: api.HostEndpointSpec{
-			Node:          n.Name,
-			InterfaceName: "*",
-		},
-	}
+	hep := c.generateHostendpointFromNode(n)
 
 	time.Sleep(c.rl.When(RateLimitCalicoCreate))
 	res, err := c.calicoClient.HostEndpoints().Create(c.ctx, hep, options.SetOptions{})
@@ -304,7 +287,7 @@ func (c *NodeController) syncAllHostendpoints() {
 
 		// Now sync node labels to the hostendpoints.
 		for _, n := range nodesList.Items {
-			c.syncHostendpointLabels(n.Name)
+			c.syncHostendpoint(n.Name)
 		}
 	}
 
@@ -322,26 +305,96 @@ func kick(c chan<- interface{}) {
 	}
 }
 
-// syncHostendpointLabels syncs the labels in Calico node objects to their corresponding
+// generateHostendpointName returns the auto hostendpoint's name.
+func (c *NodeController) generateHostendpointName(n *api.Node) string {
+	return fmt.Sprintf("%s-auto-hep", n.Name)
+}
+
+// getHostendpointExpectedIPs returns all of the known IPs on the node resource
+// that should set on the auto hostendpoint.
+func (c *NodeController) getHostendpointExpectedIPs(node *api.Node) []string {
+	expectedIPs := []string{}
+	if node.Spec.BGP.IPv4Address != "" {
+		expectedIPs = append(expectedIPs, node.Spec.BGP.IPv4Address)
+	}
+	if node.Spec.BGP.IPv6Address != "" {
+		expectedIPs = append(expectedIPs, node.Spec.BGP.IPv6Address)
+	}
+	if node.Spec.BGP.IPv4IPIPTunnelAddr != "" {
+		expectedIPs = append(expectedIPs, node.Spec.BGP.IPv4IPIPTunnelAddr)
+	}
+	if node.Spec.IPv4VXLANTunnelAddr != "" {
+		expectedIPs = append(expectedIPs, node.Spec.IPv4VXLANTunnelAddr)
+	}
+	return expectedIPs
+}
+
+// generateHostendpointFromNode returns the expected auto hostendpoint to be
+// created from the given node.
+func (c *NodeController) generateHostendpointFromNode(node *api.Node) *api.HostEndpoint {
+	hepLabels := make(map[string]string, len(node.Labels)+1)
+	for k, v := range node.Labels {
+		hepLabels[k] = v
+	}
+	hepLabels[hepCreatedLabelKey] = hepCreatedLabelValue
+
+	return &api.HostEndpoint{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   c.generateHostendpointName(node),
+			Labels: hepLabels,
+		},
+		Spec: api.HostEndpointSpec{
+			Node:          node.Name,
+			InterfaceName: "*",
+			ExpectedIPs:   c.getHostendpointExpectedIPs(node),
+		},
+	}
+}
+
+// hostendpointNeedsUpdate returns true if the current automatic hostendpoint
+// needs to be updated.
+func (c *NodeController) hostendpointNeedsUpdate(current *api.HostEndpoint, expected *api.HostEndpoint) bool {
+	if !reflect.DeepEqual(current.Labels, expected.Labels) {
+		return true
+	}
+	if !reflect.DeepEqual(current.Spec.ExpectedIPs, expected.Spec.ExpectedIPs) {
+		return true
+	}
+	return current.Spec.InterfaceName != expected.Spec.InterfaceName
+}
+
+// updateHostendpoint updates the current hostendpoint so that it matches the
+// expected hostendpoint.
+func (c *NodeController) updateHostendpoint(current *api.HostEndpoint, expected *api.HostEndpoint) error {
+	expected.ResourceVersion = current.ResourceVersion
+	expected.ObjectMeta.CreationTimestamp = current.ObjectMeta.CreationTimestamp
+	expected.ObjectMeta.UID = current.ObjectMeta.UID
+	_, err := c.calicoClient.HostEndpoints().Update(context.Background(), expected, options.SetOptions{})
+	return err
+}
+
+// syncHostendpoint syncs the labels in Calico node objects to their corresponding
 // host endpoints.
-func (c *NodeController) syncHostendpointLabels(nodeName string) {
+func (c *NodeController) syncHostendpoint(nodeName string) {
 	// On failure, we retry a certain number of times.
 	for n := 0; n < 5; n++ {
-		calNode, err := c.calicoClient.Nodes().Get(c.ctx, nodeName, options.GetOptions{})
+		node, err := c.calicoClient.Nodes().Get(c.ctx, nodeName, options.GetOptions{})
 		if err != nil {
 			log.WithError(err).Warnf("failed to get node, retrying")
 			time.Sleep(retrySleepTime)
 			continue
 		}
 
-		// Try getting the host endpoint. If it doesn't exist, create it.
-		// If the host endpoint does not exist, create it.
-		hep, err := c.calicoClient.HostEndpoints().Get(c.ctx, nodeName, options.GetOptions{})
-		if err != nil {
+		// Try getting the host endpoint.
+		currentHep, err := c.calicoClient.HostEndpoints().Get(c.ctx, c.generateHostendpointName(node), options.GetOptions{})
+		expectedHep := c.generateHostendpointFromNode(node)
+
+		// If the hostendpoint doesn't exist, create it.
+		if currentHep == nil {
 			switch err.(type) {
 			case errors.ErrorResourceDoesNotExist:
 				log.Infof("host endpoint %q doesn't exist, creating...", nodeName)
-				hep, err = c.createHostendpoint(calNode)
+				_, err = c.createHostendpoint(node)
 				if err != nil {
 					log.WithError(err).Warnf("failed to create host endpoint %q, retrying", nodeName)
 					time.Sleep(retrySleepTime)
@@ -352,74 +405,15 @@ func (c *NodeController) syncHostendpointLabels(nodeName string) {
 				time.Sleep(retrySleepTime)
 				continue
 			}
-		}
-
-		// Only continue if this is an auto hostendpoint. An auto hostendpoint
-		// will contain a special label. We only sync hostendpoints that we've created.
-		if !isAutoHostendpoint(hep) {
-			return
-		}
-
-		if hep.Labels == nil {
-			hep.Labels = make(map[string]string)
-		}
-		if hep.Annotations == nil {
-			hep.Annotations = make(map[string]string)
-		}
-
-		// Track if we need to perform an update.
-		needsUpdate := false
-
-		// If there are hostendpoint labels present, then parse them. Otherwise this is
-		// a first-time sync, in which case there are no old labels.
-		oldLabels := make(map[string]string)
-		if a, ok := hep.Annotations[hepLabelAnnotation]; ok {
-			if err = json.Unmarshal([]byte(a), &oldLabels); err != nil {
-				log.WithError(err).Error("failed to unmarshal hostendpoint labels")
-				return
-			}
-		}
-		log.Debugf("determined previously synced hostendpoint labels: %s", oldLabels)
-
-		// We've synced labels before. Determine diffs to apply.
-		// For each k/v in calico node labels, if it isn't present or the value
-		// differs, add it to the hep.
-		for k, v := range calNode.Labels {
-			if v2, ok := hep.Labels[k]; !ok || v != v2 {
-				log.Debugf("adding hostendpoint label %s=%s", k, v)
-				hep.Labels[k] = v
-				needsUpdate = true
-			}
-		}
-
-		// For each k/v that used to be in the Calico node labels, but is no longer,
-		// remove it from the Calico node.
-		for k, v := range oldLabels {
-			if _, ok := calNode.Labels[k]; !ok {
-				// The old label is no longer present. Remove it.
-				log.Debugf("deleting hostendpoint label %s=%s", k, v)
-				delete(hep.Labels, k)
-				needsUpdate = true
-			}
-		}
-
-		// Set the annotation to the correct values.
-		bytes, err := json.Marshal(hep.Labels)
-		if err != nil {
-			log.WithError(err).Errorf("error marshalling hostendpoint labels")
-			return
-		}
-		hep.Annotations[hepLabelAnnotation] = string(bytes)
-
-		// Update the hostendpoint in the datastore.
-		if needsUpdate {
-			if _, err := c.calicoClient.HostEndpoints().Update(context.Background(), hep, options.SetOptions{}); err != nil {
-				log.WithError(err).Warnf("failed to update hostendpoint, retrying")
+		} else if c.hostendpointNeedsUpdate(currentHep, expectedHep) {
+			if err := c.updateHostendpoint(currentHep, expectedHep); err != nil {
+				log.WithError(err).Warnf("failed to update hostendpoint %q, retrying", currentHep.Name)
 				time.Sleep(retrySleepTime)
 				continue
 			}
-			log.WithField("hostendpoint", calNode.ObjectMeta.Name).Info("successfully synced hostendpoint labels")
+			log.WithField("hostendpoint", node.Name).Info("successfully synced hostendpoint labels")
 		}
+
 		return
 	}
 	log.Errorf("too many retries when updating hostendpoint %q", nodeName)
