@@ -270,7 +270,7 @@ func (c *NodeController) syncAllHostendpoints() {
 		// Now go through the current host endpoints. If the hep doesn't
 		// correspond to a current node then we remove it.
 		for k, h := range heps {
-			if _, ok := nodes[h.Name]; !ok {
+			if _, ok := nodes[h.Spec.Node]; !ok {
 				time.Sleep(c.rl.When(RateLimitCalicoDelete))
 				_, err := c.calicoClient.HostEndpoints().Delete(c.ctx, h.Name, options.DeleteOptions{})
 				if err != nil {
@@ -294,7 +294,10 @@ func (c *NodeController) syncAllHostendpoints() {
 				log.WithField("hostendpoint", currentHep.Name).Info("successfully synced hostendpoint")
 			}
 		}
+		return
 	}
+
+	log.Warn("too many retries when syncing all hostendpoints")
 }
 
 // kick puts an item on the channel in non-blocking write. This means if there
@@ -384,10 +387,11 @@ func (c *NodeController) updateHostendpoint(current *api.HostEndpoint, expected 
 
 // syncHostendpoint syncs the auto hostendpoint for the given node.
 func (c *NodeController) syncHostendpoint(node *api.Node) {
+	hepName := c.generateHostendpointName(node.Name)
+
 	// On failure, we retry a certain number of times.
 	for n := 0; n < 5; n++ {
 		// Try getting the host endpoint.
-		hepName := c.generateHostendpointName(node.Name)
 		currentHep, err := c.calicoClient.HostEndpoints().Get(c.ctx, hepName, options.GetOptions{})
 		expectedHep := c.generateHostendpointFromNode(node)
 
@@ -418,7 +422,7 @@ func (c *NodeController) syncHostendpoint(node *api.Node) {
 
 		return
 	}
-	log.Errorf("too many retries when updating hostendpoint %q", node.Name)
+	log.Warnf("too many retries when syncing hostendpoint %q", hepName)
 }
 
 // deleteHostendpoint deletes the auto hostendpoint associated with a node.
