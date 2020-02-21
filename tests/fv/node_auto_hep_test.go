@@ -117,7 +117,7 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		cn.Labels = map[string]string{"calico-label": "calico-value", "label1": "badvalue"}
 		cn.Spec = api.NodeSpec{
 			BGP: &api.NodeBGPSpec{
-				IPv4Address:        "172.16.1.1",
+				IPv4Address:        "172.16.1.1/24",
 				IPv6Address:        "fe80::1",
 				IPv4IPIPTunnelAddr: "192.168.100.1",
 			},
@@ -243,7 +243,7 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		cn.Name = cNodeName
 		cn.Spec = api.NodeSpec{
 			BGP: &api.NodeBGPSpec{
-				IPv4Address:        "172.16.1.1",
+				IPv4Address:        "172.16.1.1/24",
 				IPv4IPIPTunnelAddr: "192.168.100.1",
 			},
 			OrchRefs: []api.OrchRef{

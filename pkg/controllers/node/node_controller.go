@@ -35,6 +35,7 @@ import (
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/errors"
+	"github.com/projectcalico/libcalico-go/lib/net"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -318,11 +319,14 @@ func (c *NodeController) generateHostendpointName(nodeName string) string {
 func (c *NodeController) getHostendpointExpectedIPs(node *api.Node) []string {
 	expectedIPs := []string{}
 	if node.Spec.BGP != nil {
+		// BGP IPv4 and IPv6 addresses are CIDRs.
 		if node.Spec.BGP.IPv4Address != "" {
-			expectedIPs = append(expectedIPs, node.Spec.BGP.IPv4Address)
+			ip, _, _ := net.ParseCIDROrIP(node.Spec.BGP.IPv4Address)
+			expectedIPs = append(expectedIPs, ip.String())
 		}
 		if node.Spec.BGP.IPv6Address != "" {
-			expectedIPs = append(expectedIPs, node.Spec.BGP.IPv6Address)
+			ip, _, _ := net.ParseCIDROrIP(node.Spec.BGP.IPv6Address)
+			expectedIPs = append(expectedIPs, ip.String())
 		}
 		if node.Spec.BGP.IPv4IPIPTunnelAddr != "" {
 			expectedIPs = append(expectedIPs, node.Spec.BGP.IPv4IPIPTunnelAddr)
