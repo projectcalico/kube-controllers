@@ -246,7 +246,7 @@ func (c *NodeController) syncAllHostendpoints() {
 		heps := make(map[string]api.HostEndpoint)
 		for _, h := range hepsList.Items {
 			if isAutoHostendpoint(&h) {
-				heps[h.Name] = h
+				heps[h.Spec.Node] = h
 			}
 		}
 
