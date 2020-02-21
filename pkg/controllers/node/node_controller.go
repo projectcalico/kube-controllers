@@ -117,7 +117,7 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	// also syncs up labels between k8s/calico node objects
 	nc.indexer, nc.informer = cache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, handlers, cache.Indexers{})
 
-	if nc.syncLabels {
+	if nc.syncLabels || nc.autoHostEndpoints {
 		// Start the syncer.
 		nc.initSyncer()
 		nc.syncer.Start()
