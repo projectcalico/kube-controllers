@@ -290,6 +290,8 @@ func (c *NodeController) syncAllHostendpoints() {
 			if c.hostendpointNeedsUpdate(&currentHep, expectedHep) {
 				if err := c.updateHostendpoint(&currentHep, expectedHep); err != nil {
 					log.WithError(err).Warnf("failed to update hostendpoint %q, retrying", currentHep.Name)
+					time.Sleep(retrySleepTime)
+					continue
 				}
 				log.WithField("hostendpoint", currentHep.Name).Info("successfully synced hostendpoint")
 			}
