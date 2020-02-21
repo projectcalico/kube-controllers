@@ -124,7 +124,7 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	}
 
 	if nc.autoHostEndpoints {
-		//nc.syncAllHostendpoints()
+		nc.syncAllHostendpoints()
 	}
 
 	return nc
@@ -285,9 +285,17 @@ func (c *NodeController) syncAllHostendpoints() {
 			}
 		}
 
-		// Now sync node labels to the hostendpoints.
-		for _, n := range nodesList.Items {
-			c.syncHostendpoint(n.Name)
+		// Now sync the existing hostendpoints. Note: this doesn't include any newly
+		// created hostendpoints from above.
+		for _, currentHep := range heps {
+			nodeForHep := nodes[currentHep.Spec.Node]
+			expectedHep := c.generateHostendpointFromNode(&nodeForHep)
+			if c.hostendpointNeedsUpdate(&currentHep, expectedHep) {
+				if err := c.updateHostendpoint(&currentHep, expectedHep); err != nil {
+					log.WithError(err).Warnf("failed to update hostendpoint %q, retrying", currentHep.Name)
+				}
+				log.WithField("hostendpoint", currentHep.Name).Info("successfully synced hostendpoint")
+			}
 		}
 	}
 
@@ -373,18 +381,10 @@ func (c *NodeController) updateHostendpoint(current *api.HostEndpoint, expected 
 	return err
 }
 
-// syncHostendpoint syncs the labels in Calico node objects to their corresponding
-// host endpoints.
-func (c *NodeController) syncHostendpoint(nodeName string) {
+// syncHostendpoint syncs the auto hostendpoint for the given node.
+func (c *NodeController) syncHostendpoint(node *api.Node) {
 	// On failure, we retry a certain number of times.
 	for n := 0; n < 5; n++ {
-		node, err := c.calicoClient.Nodes().Get(c.ctx, nodeName, options.GetOptions{})
-		if err != nil {
-			log.WithError(err).Warnf("failed to get node, retrying")
-			time.Sleep(retrySleepTime)
-			continue
-		}
-
 		// Try getting the host endpoint.
 		currentHep, err := c.calicoClient.HostEndpoints().Get(c.ctx, c.generateHostendpointName(node), options.GetOptions{})
 		expectedHep := c.generateHostendpointFromNode(node)
@@ -393,15 +393,15 @@ func (c *NodeController) syncHostendpoint(nodeName string) {
 		if currentHep == nil {
 			switch err.(type) {
 			case errors.ErrorResourceDoesNotExist:
-				log.Infof("host endpoint %q doesn't exist, creating...", nodeName)
+				log.Infof("host endpoint %q doesn't exist, creating...", node.Name)
 				_, err = c.createHostendpoint(node)
 				if err != nil {
-					log.WithError(err).Warnf("failed to create host endpoint %q, retrying", nodeName)
+					log.WithError(err).Warnf("failed to create host endpoint %q, retrying", node.Name)
 					time.Sleep(retrySleepTime)
 					continue
 				}
 			default:
-				log.WithError(err).Warnf("failed to get host endpoint %q, retrying", nodeName)
+				log.WithError(err).Warnf("failed to get host endpoint %q, retrying", node.Name)
 				time.Sleep(retrySleepTime)
 				continue
 			}
@@ -411,12 +411,12 @@ func (c *NodeController) syncHostendpoint(nodeName string) {
 				time.Sleep(retrySleepTime)
 				continue
 			}
-			log.WithField("hostendpoint", node.Name).Info("successfully synced hostendpoint labels")
+			log.WithField("hostendpoint", node.Name).Info("successfully synced hostendpoint")
 		}
 
 		return
 	}
-	log.Errorf("too many retries when updating hostendpoint %q", nodeName)
+	log.Errorf("too many retries when updating hostendpoint %q", node.Name)
 }
 
 // deleteHostendpoint deletes the auto hostendpoint associated with a node.

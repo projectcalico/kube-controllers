@@ -72,7 +72,7 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 			}
 
 			if c.autoHostEndpoints {
-				c.syncHostendpoint(n.Name)
+				c.syncHostendpoint(n)
 			}
 
 		case bapi.UpdateTypeKVDeleted:
