@@ -220,8 +220,8 @@ func (c *NodeController) createHostendpoint(n *api.Node) (*api.HostEndpoint, err
 }
 
 // syncAllHostendpoints syncs all Calico nodes with their hostendpoints.
-// If hostendpoints don't already exist, they are created. Dangling auto
-// hostendpoints are deleted.
+// Dangling auto hostendpoints are deleted. Note: missing auto hostendpoints
+// are not created here but instead are created when the syncer gets initialized.
 func (c *NodeController) syncAllHostendpoints() {
 	log.Debug("syncing all hostendpoints")
 
@@ -247,18 +247,6 @@ func (c *NodeController) syncAllHostendpoints() {
 		for _, h := range hepsList.Items {
 			if isAutoHostendpoint(&h) {
 				heps[h.Spec.Node] = h
-			}
-		}
-
-		// Go through current nodes, creating hostendpoints for them if they don't exist.
-		for _, n := range nodesList.Items {
-			if _, ok := heps[n.Name]; !ok {
-				_, err = c.createHostendpoint(&n)
-				if err != nil {
-					log.WithError(err).Info("could not create hostendpoint, retrying")
-					time.Sleep(retrySleepTime)
-					continue
-				}
 			}
 		}
 
