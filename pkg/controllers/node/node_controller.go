@@ -123,9 +123,9 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 		nc.syncer.Start()
 	}
 
-	if nc.autoHostEndpoints {
-		nc.syncAllHostendpoints()
-	}
+	// Always sync hostendpoints; if autoHostEndpoints is off, we clean up
+	// remaining auto hostendpoints.
+	nc.syncAllHostendpoints()
 
 	return nc
 }
@@ -247,7 +247,22 @@ func (c *NodeController) syncAllHostendpoints() {
 		for _, h := range hepsList.Items {
 			if isAutoHostendpoint(&h) {
 				heps[h.Spec.Node] = h
+
+				if !c.autoHostEndpoints {
+					log.Infof("autoHostEndpoints is disabled, deleting auto hostendpoint %q", h.Name)
+					_, err := c.calicoClient.HostEndpoints().Delete(c.ctx, h.Name, options.DeleteOptions{})
+					if err != nil {
+						log.WithError(err).Warnf("could not delete auto hostendpoint %q", h.Name)
+						time.Sleep(retrySleepTime)
+						continue
+					}
+				}
 			}
+		}
+
+		// Skip hostendpoint syncing if autoHostEndpoints is off
+		if !c.autoHostEndpoints {
+			return
 		}
 
 		nodes := make(map[string]api.Node)
