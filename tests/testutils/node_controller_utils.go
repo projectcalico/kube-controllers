@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -77,10 +77,10 @@ func ExpectHostendpoint(c client.Interface, hepName string, expectedLabels map[s
 		return fmt.Errorf("expected all-interfaces hostendpoint. Expected: %q, Actual: %q", "*", hep.Spec.InterfaceName)
 	}
 	if len(hep.Spec.Profiles) > 0 {
-		return fmt.Errorf("expected profiles to be empty. Actual: %q", "*", hep.Spec.Profiles)
+		return fmt.Errorf("expected profiles to be empty. Actual: %q", hep.Spec.Profiles)
 	}
 	if len(hep.Spec.Ports) > 0 {
-		return fmt.Errorf("expected ports to be empty. Actual: %q", "*", hep.Spec.Ports)
+		return fmt.Errorf("expected ports to be empty. Actual: %q", hep.Spec.Ports)
 	}
 
 	if !reflect.DeepEqual(hep.Labels, expectedLabels) {
