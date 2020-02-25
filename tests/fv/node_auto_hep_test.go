@@ -92,12 +92,9 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		etcd.Stop()
 	})
 
-	runController := func() {
-		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), "")
-	}
-
 	It("should create hostendpoints for Calico nodes and sync labels", func() {
-		runController()
+		// Run controller with auto HEP enabled
+		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), true)
 
 		// Create a kubernetes node with some labels.
 		kn := &v1.Node{
@@ -257,7 +254,7 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Run the controller now.
-		runController()
+		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), true)
 
 		// Expect the dangling hostendpoint to be deleted.
 		Eventually(func() error { return testutils.ExpectHostendpointDeleted(c, "testnode-auto-hep") },

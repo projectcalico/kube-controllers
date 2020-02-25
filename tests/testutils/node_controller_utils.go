@@ -31,18 +31,22 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func RunNodeController(datastoreType apiconfig.DatastoreType, etcdIP, kconfigfile, ctrls string) *containers.Container {
-	if ctrls == "" {
-		// Default to all controllers.
-		ctrls = "workloadendpoint,namespace,policy,node,serviceaccount"
+func RunNodeController(datastoreType apiconfig.DatastoreType, etcdIP, kconfigfile string, autoHepEnabled bool) *containers.Container {
+	// Default to all controllers.
+	ctrls := "workloadendpoint,namespace,policy,node,serviceaccount"
+
+	autoHep := "disabled"
+	if autoHepEnabled {
+		autoHep = "enabled"
 	}
+
 	return containers.Run("calico-kube-controllers",
 		containers.RunOpts{AutoRemove: true},
 		"--privileged",
 		"-e", fmt.Sprintf("ETCD_ENDPOINTS=http://%s:2379", etcdIP),
 		"-e", fmt.Sprintf("DATASTORE_TYPE=%s", datastoreType),
 		"-e", fmt.Sprintf("ENABLED_CONTROLLERS=%s", ctrls),
-		"-e", fmt.Sprintf("AUTO_HOST_ENDPOINTS=enabled"),
+		"-e", fmt.Sprintf("AUTO_HOST_ENDPOINTS=%s", autoHep),
 		"-e", "LOG_LEVEL=debug",
 		"-e", fmt.Sprintf("KUBECONFIG=%s", kconfigfile),
 		"-e", "RECONCILER_PERIOD=10s",
