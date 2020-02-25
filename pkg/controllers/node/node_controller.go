@@ -416,6 +416,7 @@ func (c *NodeController) syncHostendpoint(node *api.Node) {
 				continue
 			}
 		} else if c.hostendpointNeedsUpdate(currentHep, expectedHep) {
+			log.WithField("hostendpoint", node.Name).Debug("hostendpoint needs update")
 			if err := c.updateHostendpoint(currentHep, expectedHep); err != nil {
 				log.WithError(err).Warnf("failed to update hostendpoint %q, retrying", currentHep.Name)
 				time.Sleep(retrySleepTime)

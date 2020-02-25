@@ -92,8 +92,168 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		etcd.Stop()
 	})
 
-	It("should create hostendpoints for Calico nodes and sync labels", func() {
+	It("should create and sync hostendpoints for Calico nodes", func() {
 		// Run controller with auto HEP enabled
+		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), true)
+
+		// Create a kubernetes node with some labels.
+		kn := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: kNodeName,
+				Labels: map[string]string{
+					"label1": "value1",
+				},
+			},
+		}
+		_, err := k8sClient.CoreV1().Nodes().Create(kn)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create a Calico node with a reference to it.
+		cn := calicoNode(c, cNodeName, kNodeName, map[string]string{"calico-label": "calico-value", "label1": "badvalue"})
+		_, err = c.Nodes().Create(context.Background(), cn, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Expect the node label to sync.
+		expected := map[string]string{"label1": "value1", "calico-label": "calico-value"}
+		Eventually(func() error { return testutils.ExpectNodeLabels(c, expected, cNodeName) },
+			time.Second*15, 500*time.Millisecond).Should(BeNil())
+
+		expectedHepName := cn.Name + "-auto-hep"
+
+		// Expect a wildcard hostendpoint to be created.
+		expectedLabels := map[string]string{
+			"label1":                       "value1",
+			"calico-label":                 "calico-value",
+			"projectcalico.org/created-by": "calico-kube-controllers",
+		}
+		expectedIPs := []string{"172.16.1.1", "fe80::1", "192.168.100.1"}
+		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedLabels, expectedIPs) },
+			time.Second*15, 500*time.Millisecond).Should(BeNil())
+
+		// Update the Kubernetes node labels.
+		kn, err = k8sClient.CoreV1().Nodes().Get(kn.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		kn.Labels["label1"] = "value2"
+		_, err = k8sClient.CoreV1().Nodes().Update(kn)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Expect the node labels to sync.
+		expected = map[string]string{"label1": "value2", "calico-label": "calico-value"}
+		Eventually(func() error { return testutils.ExpectNodeLabels(c, expected, cNodeName) },
+			time.Second*15, 500*time.Millisecond).Should(BeNil())
+
+		// Expect the hostendpoint labels to sync.
+		expectedLabels["label1"] = "value2"
+		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedLabels, expectedIPs) },
+			time.Second*15, 500*time.Millisecond).Should(BeNil())
+
+		// Update the Calico node with new IPs.
+		cn, err = c.Nodes().Get(context.Background(), cn.Name, options.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		cn.Spec.BGP.IPv4Address = "172.100.2.3"
+		cn.Spec.BGP.IPv4IPIPTunnelAddr = ""
+		cn.Spec.IPv4VXLANTunnelAddr = "10.10.20.1"
+		_, err = c.Nodes().Update(context.Background(), cn, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Expect the hostendpoint's expectedIPs to sync the new node IPs.
+		expectedIPs = []string{"172.100.2.3", "fe80::1", "10.10.20.1"}
+		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedLabels, expectedIPs) },
+			time.Second*15, 500*time.Millisecond).Should(BeNil())
+
+		// Delete the Kubernetes node.
+		err = k8sClient.CoreV1().Nodes().Delete(kNodeName, &metav1.DeleteOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() *api.Node {
+			node, _ := c.Nodes().Get(context.Background(), cNodeName, options.GetOptions{})
+			return node
+		}, time.Second*2, 500*time.Millisecond).Should(BeNil())
+
+		// Expect the hostendpoint for the node to be deleted.
+		Eventually(func() error { return testutils.ExpectHostendpointDeleted(c, expectedHepName) },
+			time.Second*2, 500*time.Millisecond).Should(BeNil())
+	})
+
+	It("should clean up dangling hostendpoints and create hostendpoints for nodes without them", func() {
+		// Create a wildcard HEP that matches what might have been created
+		// automatically by kube-controllers. But we won't have a corresponding
+		// node for this HEP.
+		danglingHep := &api.HostEndpoint{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "dangling-auto-hep",
+				Labels: map[string]string{
+					"projectcalico.org/created-by": "calico-kube-controllers",
+				},
+			},
+			Spec: api.HostEndpointSpec{
+				Node:          "testnode",
+				InterfaceName: "*",
+				ExpectedIPs:   []string{"192.168.1.100"},
+			},
+		}
+		_, err := c.HostEndpoints().Create(context.Background(), danglingHep, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create another wildcard HEP but this one isn't managed by Calico.
+		userHep := &api.HostEndpoint{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "user-managed-hep",
+				Labels: map[string]string{
+					"env": "staging",
+				},
+			},
+			Spec: api.HostEndpointSpec{
+				Node:          "testnode",
+				InterfaceName: "*",
+			},
+		}
+		_, err = c.HostEndpoints().Create(context.Background(), userHep, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create a kubernetes node
+		kn := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: kNodeName,
+				Labels: map[string]string{
+					"auto": "hep",
+				},
+			},
+		}
+		_, err = k8sClient.CoreV1().Nodes().Create(kn)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create a Calico node with a reference to the above node.
+		cn := calicoNode(c, cNodeName, kNodeName, map[string]string{})
+		_, err = c.Nodes().Create(context.Background(), cn, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Run the controller now.
+		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), true)
+
+		// Expect the dangling hostendpoint to be deleted.
+		Eventually(func() error { return testutils.ExpectHostendpointDeleted(c, danglingHep.Name) },
+			time.Second*2, 500*time.Millisecond).Should(BeNil())
+
+		// Expect the user's own hostendpoint to still exist.
+		// When hostendpoint.Spec.ExpectedIPs is empty, the field is a nil slice
+		var noExpectedIPs []string
+		Eventually(func() error {
+			return testutils.ExpectHostendpoint(c, userHep.Name, map[string]string{"env": "staging"}, noExpectedIPs)
+		}, time.Second*15, 500*time.Millisecond).Should(BeNil())
+
+		// Expect an auto hostendpoint was created for the Calico node.
+		autoHepName := cNodeName + "-auto-hep"
+		expectedIPs := []string{"172.16.1.1", "fe80::1", "192.168.100.1"}
+		expectedLabels := map[string]string{
+			"auto":                         "hep",
+			"projectcalico.org/created-by": "calico-kube-controllers",
+		}
+		Eventually(func() error {
+			return testutils.ExpectHostendpoint(c, autoHepName, expectedLabels, expectedIPs)
+		}, time.Second*15, 500*time.Millisecond).Should(BeNil())
+	})
+
+	It("should delete hostendpoints when AUTO_HOST_ENDPOINTS is disabled", func() {
 		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), true)
 
 		// Create a kubernetes node with some labels.
@@ -111,7 +271,7 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		// Create a Calico node with a reference to it.
 		cn := api.NewNode()
 		cn.Name = cNodeName
-		cn.Labels = map[string]string{"calico-label": "calico-value", "label1": "badvalue"}
+		cn.Labels = map[string]string{"calico-label": "calico-value"}
 		cn.Spec = api.NodeSpec{
 			BGP: &api.NodeBGPSpec{
 				IPv4Address:        "172.16.1.1/24",
@@ -128,153 +288,49 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		_, err = c.Nodes().Create(context.Background(), cn, options.SetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
-		// Expect the node label to sync.
-		expected := map[string]string{"label1": "value1", "calico-label": "calico-value"}
-		Eventually(func() error { return testutils.ExpectNodeLabels(c, expected, cNodeName) },
-			time.Second*15, 500*time.Millisecond).Should(BeNil())
-
 		expectedHepName := cn.Name + "-auto-hep"
 
 		// Expect a wildcard hostendpoint to be created.
-		var hep *api.HostEndpoint
-		Eventually(func() *api.HostEndpoint {
-			hep, _ = c.HostEndpoints().Get(context.Background(), expectedHepName, options.GetOptions{})
-			return hep
-		}, time.Second*2, 500*time.Millisecond).ShouldNot(BeNil())
-
-		Expect(hep.Spec.InterfaceName).To(Equal("*"))
-		Expect(hep.Spec.ExpectedIPs).To(ConsistOf([]string{"172.16.1.1", "fe80::1", "192.168.100.1"}))
-		Expect(hep.Spec.Profiles).To(BeEmpty())
-		Expect(hep.Spec.Ports).To(BeEmpty())
-
-		// Expect the wildcard hostendpoint to have the same values as the node.
-		Expect(hep.Labels).To(HaveKeyWithValue("label1", "value1"))
-		Expect(hep.Labels).To(HaveKeyWithValue("calico-label", "calico-value"))
-		Expect(hep.Labels).To(HaveKeyWithValue("projectcalico.org/created-by", "calico-kube-controllers"))
-		Expect(len(hep.Labels)).To(Equal(3))
-
-		// Update the Kubernetes node labels.
-		kn, err = k8sClient.CoreV1().Nodes().Get(kn.Name, metav1.GetOptions{})
-		Expect(err).NotTo(HaveOccurred())
-		kn.Labels["label1"] = "value2"
-		_, err = k8sClient.CoreV1().Nodes().Update(kn)
-		Expect(err).NotTo(HaveOccurred())
-
-		// Expect the node labels to sync.
-		expected = map[string]string{"label1": "value2", "calico-label": "calico-value"}
-		Eventually(func() error { return testutils.ExpectNodeLabels(c, expected, cNodeName) },
-			time.Second*15, 500*time.Millisecond).Should(BeNil())
-
-		// Expect the hostendpoint labels to sync.
-		expected = map[string]string{
-			"label1":                       "value2",
+		expectedIPs := []string{"172.16.1.1", "fe80::1", "192.168.100.1"}
+		expectedLabels := map[string]string{
+			"label1":                       "value1",
 			"calico-label":                 "calico-value",
 			"projectcalico.org/created-by": "calico-kube-controllers",
 		}
-		Eventually(func() error { return testutils.ExpectHostendpointLabels(c, expected, expectedHepName) },
+		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedLabels, expectedIPs) },
 			time.Second*15, 500*time.Millisecond).Should(BeNil())
 
-		// Delete the Kubernetes node.
-		err = k8sClient.CoreV1().Nodes().Delete(kNodeName, &metav1.DeleteOptions{})
-		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() *api.Node {
-			node, _ := c.Nodes().Get(context.Background(), cNodeName, options.GetOptions{})
-			return node
-		}, time.Second*2, 500*time.Millisecond).Should(BeNil())
+		// Restart the controller but with auto hostendpoints disabled.
+		nodeController.Stop()
+		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), false)
 
 		// Expect the hostendpoint for the node to be deleted.
-		Eventually(func() error { return testutils.ExpectHostendpointDeleted(c, cn.Name) },
+		Eventually(func() error { return testutils.ExpectHostendpointDeleted(c, expectedHepName) },
 			time.Second*2, 500*time.Millisecond).Should(BeNil())
-	})
-
-	It("should clean up dangling hostendpoints and create heps for nodes without them", func() {
-		// Create a wildcard HEP that matches what might have been created
-		// automatically by kube-controllers. But we won't have a corresponding
-		// node for this HEP.
-		hep := &api.HostEndpoint{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "testnode-auto-hep",
-				Labels: map[string]string{
-					"projectcalico.org/created-by": "calico-kube-controllers",
-				},
-			},
-			Spec: api.HostEndpointSpec{
-				Node:          "testnode",
-				InterfaceName: "*",
-				ExpectedIPs:   []string{"192.168.1.100"},
-			},
-		}
-		_, err := c.HostEndpoints().Create(context.Background(), hep, options.SetOptions{})
-		Expect(err).NotTo(HaveOccurred())
-
-		// Create another wildcard HEP but this one isn't managed by Calico.
-		hep2 := &api.HostEndpoint{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "user-managed-hep",
-				Labels: map[string]string{
-					"env": "staging",
-				},
-			},
-			Spec: api.HostEndpointSpec{
-				Node:          "testnode",
-				InterfaceName: "*",
-			},
-		}
-		_, err = c.HostEndpoints().Create(context.Background(), hep2, options.SetOptions{})
-		Expect(err).NotTo(HaveOccurred())
-
-		// Create a kubernetes node
-		kn := &v1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: kNodeName,
-				Labels: map[string]string{
-					"label1": "value1",
-				},
-			},
-		}
-		_, err = k8sClient.CoreV1().Nodes().Create(kn)
-		Expect(err).NotTo(HaveOccurred())
-
-		// Create a Calico node with a reference to it.
-		cn := api.NewNode()
-		cn.Name = cNodeName
-		cn.Spec = api.NodeSpec{
-			BGP: &api.NodeBGPSpec{
-				IPv4Address:        "172.16.1.1/24",
-				IPv4IPIPTunnelAddr: "192.168.100.1",
-			},
-			OrchRefs: []api.OrchRef{
-				{
-					NodeName:     kNodeName,
-					Orchestrator: "k8s",
-				},
-			},
-		}
-		_, err = c.Nodes().Create(context.Background(), cn, options.SetOptions{})
-		Expect(err).NotTo(HaveOccurred())
-
-		// Run the controller now.
-		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), true)
-
-		// Expect the dangling hostendpoint to be deleted.
-		Eventually(func() error { return testutils.ExpectHostendpointDeleted(c, "testnode-auto-hep") },
-			time.Second*2, 500*time.Millisecond).Should(BeNil())
-
-		// Expect the user's own hostendpoints to still exist.
-		var userHep *api.HostEndpoint
-		Eventually(func() *api.HostEndpoint {
-			userHep, _ = c.HostEndpoints().Get(context.Background(), "user-managed-hep", options.GetOptions{})
-			return userHep
-		}, time.Second*2, 500*time.Millisecond).ShouldNot(BeNil())
-		Expect(userHep.Labels).To(BeEquivalentTo(hep2.Labels))
-		Expect(userHep.Spec.Node).To(Equal(hep2.Spec.Node))
-		Expect(userHep.Spec.InterfaceName).To(Equal(hep2.Spec.InterfaceName))
-
-		var autoHep *api.HostEndpoint
-		autoHepName := cNodeName + "-auto-hep"
-		Eventually(func() *api.HostEndpoint {
-			autoHep, _ = c.HostEndpoints().Get(context.Background(), autoHepName, options.GetOptions{})
-			return autoHep
-		}, time.Second*2, 500*time.Millisecond).ShouldNot(BeNil())
 	})
 })
+
+func calicoNode(c client.Interface, name string, k8sNodeName string, labels map[string]string) *api.Node {
+	// Create a Calico node with a reference to it.
+	node := api.NewNode()
+	node.Name = name
+	node.Labels = make(map[string]string)
+	for k, v := range labels {
+		node.Labels[k] = v
+	}
+
+	node.Spec = api.NodeSpec{
+		BGP: &api.NodeBGPSpec{
+			IPv4Address:        "172.16.1.1/24",
+			IPv6Address:        "fe80::1",
+			IPv4IPIPTunnelAddr: "192.168.100.1",
+		},
+		OrchRefs: []api.OrchRef{
+			{
+				NodeName:     k8sNodeName,
+				Orchestrator: "k8s",
+			},
+		},
+	}
+	return node
+}

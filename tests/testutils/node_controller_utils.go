@@ -67,16 +67,34 @@ func ExpectNodeLabels(c client.Interface, labels map[string]string, node string)
 	return nil
 }
 
-func ExpectHostendpointLabels(c client.Interface, labels map[string]string, hepName string) error {
+func ExpectHostendpoint(c client.Interface, hepName string, expectedLabels map[string]string, expectedIPs []string) error {
 	hep, err := c.HostEndpoints().Get(context.Background(), hepName, options.GetOptions{})
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(hep.Labels, labels) {
-		s := fmt.Sprintf("Labels do not match.\n\nExpected: %#v\n  Actual: %#v\n", labels, hep.Labels)
+
+	if hep.Spec.InterfaceName != "*" {
+		return fmt.Errorf("expected all-interfaces hostendpoint. Expected: %q, Actual: %q", "*", hep.Spec.InterfaceName)
+	}
+	if len(hep.Spec.Profiles) > 0 {
+		return fmt.Errorf("expected profiles to be empty. Actual: %q", "*", hep.Spec.Profiles)
+	}
+	if len(hep.Spec.Ports) > 0 {
+		return fmt.Errorf("expected ports to be empty. Actual: %q", "*", hep.Spec.Ports)
+	}
+
+	if !reflect.DeepEqual(hep.Labels, expectedLabels) {
+		s := fmt.Sprintf("labels do not match.\n\nExpected: %#v\n  Actual: %#v\n", expectedLabels, hep.Labels)
 		logrus.Warn(s)
 		return fmt.Errorf(s)
 	}
+
+	if !reflect.DeepEqual(hep.Spec.ExpectedIPs, expectedIPs) {
+		s := fmt.Sprintf("expectedIPs do not match.\n\nExpected: %#v\n  Actual: %#v\n", expectedIPs, hep.Spec.ExpectedIPs)
+		logrus.Warn(s)
+		return fmt.Errorf(s)
+	}
+
 	return nil
 }
 
