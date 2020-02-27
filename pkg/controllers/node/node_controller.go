@@ -399,22 +399,17 @@ func (c *NodeController) syncAutoHostendpoints() error {
 // listAutoHostendpoints returns a map of auto hostendpoints keyed by the
 // hostendpoint's name.
 func (c *NodeController) listAutoHostendpoints() (map[string]api.HostEndpoint, error) {
-	for n := 0; n < 5; n++ {
-		heps, err := c.calicoClient.HostEndpoints().List(c.ctx, options.ListOptions{})
-		if err != nil {
-			log.WithError(err).Warn("could not list host endpoints, retrying")
-			time.Sleep(retrySleepTime)
-			continue
-		}
-		m := make(map[string]api.HostEndpoint)
-		for _, h := range heps.Items {
-			if isAutoHostendpoint(&h) {
-				m[h.Name] = h
-			}
-		}
-		return m, nil
+	heps, err := c.calicoClient.HostEndpoints().List(c.ctx, options.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("could not list hostendpoints: %v", err.Error())
 	}
-	return nil, fmt.Errorf("too many retries while listing hostendpoints")
+	m := make(map[string]api.HostEndpoint)
+	for _, h := range heps.Items {
+		if isAutoHostendpoint(&h) {
+			m[h.Name] = h
+		}
+	}
+	return m, nil
 }
 
 // deleteHostendpoint removes the specified hostendpoint.
