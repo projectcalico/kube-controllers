@@ -15,8 +15,6 @@
 package node
 
 import (
-	"os"
-
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
@@ -49,13 +47,9 @@ func (c *NodeController) OnStatusUpdated(status bapi.SyncStatus) {
 
 	case bapi.InSync:
 		err := c.syncAutoHostendpoints()
-		exitOnError(err)
-	}
-}
-
-func exitOnError(err error) {
-	if err != nil {
-		os.Exit(1)
+		if err != nil {
+			logrus.WithError(err).Fatal()
+		}
 	}
 }
 
@@ -98,7 +92,9 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 				// If we're already in-sync, sync the node's auto hostendpoint.
 				if c.syncStatus == bapi.InSync {
 					err := c.syncHostendpoint(n)
-					exitOnError(err)
+					if err != nil {
+						logrus.WithError(err).Fatal()
+					}
 				}
 			}
 
@@ -126,7 +122,9 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 			if c.autoHostEndpoints {
 				hepName := c.generateHostendpointName(nodeName)
 				err := c.deleteHostendpoint(hepName)
-				exitOnError(err)
+				if err != nil {
+					logrus.WithError(err).Fatal()
+				}
 			}
 
 		default:
