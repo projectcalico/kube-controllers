@@ -121,7 +121,7 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 
 			if c.autoHostEndpoints {
 				hepName := c.generateAutoHostendpointName(nodeName)
-				err := c.deleteHostendpoint(hepName)
+				err := c.deleteHostendpoint(hepName, true)
 				if err != nil {
 					logrus.WithError(err).Fatal()
 				}
