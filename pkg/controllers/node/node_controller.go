@@ -323,7 +323,6 @@ func (c *NodeController) syncHostendpoint(node *api.Node) error {
 		// Try getting the host endpoint.
 		expectedHep := c.generateHostendpointFromNode(node)
 		currentHep, err := c.calicoClient.HostEndpoints().Get(c.ctx, hepName, options.GetOptions{})
-
 		if err != nil {
 			switch err.(type) {
 			case errors.ErrorResourceDoesNotExist:
