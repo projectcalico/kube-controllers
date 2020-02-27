@@ -71,6 +71,8 @@ type NodeController struct {
 	config            *config.Config
 	syncLabels        bool
 	autoHostEndpoints bool
+	nodeCache         map[string]*api.Node
+	syncStatus        bapi.SyncStatus
 }
 
 // NewNodeController Constructor for NodeController
@@ -83,6 +85,7 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 		nodemapper:        map[string]string{},
 		config:            cfg,
 		autoHostEndpoints: cfg.AutoHostEndpoints == "enabled",
+		nodeCache:         make(map[string]*api.Node),
 	}
 
 	// channel used to kick the controller into scheduling a sync. It has length
@@ -123,10 +126,6 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 		nc.initSyncer()
 		nc.syncer.Start()
 	}
-
-	// Always sync hostendpoints; if autoHostEndpoints is off, we clean up
-	// remaining auto hostendpoints.
-	nc.syncAllHostendpoints()
 
 	return nc
 }
@@ -220,99 +219,6 @@ func (c *NodeController) createHostendpoint(n *api.Node) (*api.HostEndpoint, err
 	return res, nil
 }
 
-// syncAllHostendpoints syncs all Calico nodes with their hostendpoints.
-// Dangling auto hostendpoints are deleted. Note: missing auto hostendpoints
-// are not created here but instead are created when the syncer gets initialized.
-func (c *NodeController) syncAllHostendpoints() {
-	log.Debug("syncing all hostendpoints")
-
-	// On failure, we retry a certain number of times.
-	for n := 0; n < 5; n++ {
-		time.Sleep(c.rl.When(RateLimitCalicoList))
-		nodesList, err := c.calicoClient.Nodes().List(c.ctx, options.ListOptions{})
-		if err != nil {
-			log.WithError(err).Info("could not list nodes, retrying")
-			time.Sleep(retrySleepTime)
-			continue
-		}
-		c.rl.Forget(RateLimitCalicoList)
-
-		time.Sleep(c.rl.When(RateLimitCalicoList))
-		hepsList, err := c.calicoClient.HostEndpoints().List(c.ctx, options.ListOptions{})
-		if err != nil {
-			log.WithError(err).Info("could not list hostendpoints, retrying")
-			time.Sleep(retrySleepTime)
-			continue
-		}
-		c.rl.Forget(RateLimitCalicoList)
-
-		// Filter the list of hostendpoints so that we are working only with auto
-		// hostendpoints created by kube-controllers.
-		heps := make(map[string]api.HostEndpoint)
-		for _, h := range hepsList.Items {
-			if isAutoHostendpoint(&h) {
-				heps[h.Spec.Node] = h
-
-				if !c.autoHostEndpoints {
-					log.Infof("autoHostEndpoints is disabled, deleting auto hostendpoint %q", h.Name)
-					time.Sleep(c.rl.When(RateLimitCalicoDelete))
-					_, err := c.calicoClient.HostEndpoints().Delete(c.ctx, h.Name, options.DeleteOptions{})
-					if err != nil {
-						log.WithError(err).Warnf("could not delete auto hostendpoint %q", h.Name)
-						time.Sleep(retrySleepTime)
-						continue
-					}
-					c.rl.Forget(RateLimitCalicoDelete)
-				}
-			}
-		}
-
-		// Skip hostendpoint syncing if autoHostEndpoints is off
-		if !c.autoHostEndpoints {
-			return
-		}
-
-		nodes := make(map[string]api.Node)
-		for _, n := range nodesList.Items {
-			nodes[n.Name] = n
-		}
-
-		// Now go through the current host endpoints. If the hep doesn't
-		// correspond to a current node then we remove it.
-		for k, h := range heps {
-			if _, ok := nodes[h.Spec.Node]; !ok {
-				time.Sleep(c.rl.When(RateLimitCalicoDelete))
-				_, err := c.calicoClient.HostEndpoints().Delete(c.ctx, h.Name, options.DeleteOptions{})
-				if err != nil {
-					log.WithError(err).Warnf("could not delete unused hostendpoint %q", h.Name)
-					time.Sleep(retrySleepTime)
-					continue
-				}
-				c.rl.Forget(RateLimitCalicoDelete)
-				delete(heps, k)
-			}
-		}
-
-		// Now sync the existing hostendpoints. Note: this doesn't include any newly
-		// created hostendpoints from above.
-		for _, currentHep := range heps {
-			nodeForHep := nodes[currentHep.Spec.Node]
-			expectedHep := c.generateHostendpointFromNode(&nodeForHep)
-			if c.hostendpointNeedsUpdate(&currentHep, expectedHep) {
-				if err := c.updateHostendpoint(&currentHep, expectedHep); err != nil {
-					log.WithError(err).Warnf("failed to update hostendpoint %q, retrying", currentHep.Name)
-					time.Sleep(retrySleepTime)
-					continue
-				}
-				log.WithField("hostendpoint", currentHep.Name).Info("successfully synced hostendpoint")
-			}
-		}
-		return
-	}
-
-	log.Warn("too many retries when syncing all hostendpoints")
-}
-
 // kick puts an item on the channel in non-blocking write. This means if there
 // is already something pending, it has no effect. This allows us to coalesce
 // multiple requests into a single pending request.
@@ -391,20 +297,24 @@ func (c *NodeController) hostendpointNeedsUpdate(current *api.HostEndpoint, expe
 // updateHostendpoint updates the current hostendpoint so that it matches the
 // expected hostendpoint.
 func (c *NodeController) updateHostendpoint(current *api.HostEndpoint, expected *api.HostEndpoint) error {
-	expected.ResourceVersion = current.ResourceVersion
-	expected.ObjectMeta.CreationTimestamp = current.ObjectMeta.CreationTimestamp
-	expected.ObjectMeta.UID = current.ObjectMeta.UID
+	if c.hostendpointNeedsUpdate(current, expected) {
+		log.WithField("hostendpoint", current.Name).Debug("hostendpoint needs update")
+		expected.ResourceVersion = current.ResourceVersion
+		expected.ObjectMeta.CreationTimestamp = current.ObjectMeta.CreationTimestamp
+		expected.ObjectMeta.UID = current.ObjectMeta.UID
 
-	time.Sleep(c.rl.When(RateLimitCalicoUpdate))
-	_, err := c.calicoClient.HostEndpoints().Update(context.Background(), expected, options.SetOptions{})
-	if err == nil {
-		c.rl.Forget(RateLimitCalicoUpdate)
+		time.Sleep(c.rl.When(RateLimitCalicoUpdate))
+		_, err := c.calicoClient.HostEndpoints().Update(context.Background(), expected, options.SetOptions{})
+		if err == nil {
+			c.rl.Forget(RateLimitCalicoUpdate)
+		}
+		return err
 	}
-	return err
+	return nil
 }
 
 // syncHostendpoint syncs the auto hostendpoint for the given node.
-func (c *NodeController) syncHostendpoint(node *api.Node) {
+func (c *NodeController) syncHostendpoint(node *api.Node) error {
 	hepName := c.generateHostendpointName(node.Name)
 	log.Debugf("syncing hostendpoint %q from node %+v", hepName, node)
 
@@ -418,7 +328,7 @@ func (c *NodeController) syncHostendpoint(node *api.Node) {
 			switch err.(type) {
 			case errors.ErrorResourceDoesNotExist:
 				log.Infof("host endpoint %q doesn't exist, creating it", node.Name)
-				_, err = c.createHostendpoint(node)
+				_, err := c.createHostendpoint(node)
 				if err != nil {
 					log.WithError(err).Warnf("failed to create host endpoint %q, retrying", node.Name)
 					time.Sleep(retrySleepTime)
@@ -429,60 +339,98 @@ func (c *NodeController) syncHostendpoint(node *api.Node) {
 				time.Sleep(retrySleepTime)
 				continue
 			}
-		} else if c.hostendpointNeedsUpdate(currentHep, expectedHep) {
-			log.WithField("hostendpoint", node.Name).Debug("hostendpoint needs update")
-			if err := c.updateHostendpoint(currentHep, expectedHep); err != nil {
-				log.WithError(err).Warnf("failed to update hostendpoint %q, retrying", currentHep.Name)
-				time.Sleep(retrySleepTime)
-				continue
-			}
-			log.WithField("hostendpoint", node.Name).Info("successfully synced hostendpoint")
-		}
-
-		return
-	}
-	log.Warnf("too many retries when syncing hostendpoint %q", hepName)
-}
-
-// deleteHostendpoint deletes the auto hostendpoint associated with a node.
-func (c *NodeController) deleteHostendpoint(nodeName string) {
-	hepName := c.generateHostendpointName(nodeName)
-	// On failure, we retry a certain number of times.
-	for n := 0; n < 5; n++ {
-		hep, err := c.calicoClient.HostEndpoints().Get(c.ctx, hepName, options.GetOptions{})
-		if err != nil {
-			log.WithError(err).Warnf("failed to get host endpoint %q, retrying", hepName)
+		} else if err := c.updateHostendpoint(currentHep, expectedHep); err != nil {
+			log.WithError(err).Warnf("failed to update hostendpoint %q, retrying", currentHep.Name)
 			time.Sleep(retrySleepTime)
 			continue
 		}
 
-		// If for some reason a hep exists with the node's name but it isn't
-		// managed by us, log and return.
-		if !isAutoHostendpoint(hep) {
-			log.WithError(err).Warnf("did not delete hostendpoint %q because it is not managed by kube-controllers", hepName)
-			return
-		}
+		log.WithField("hostendpoint", node.Name).Info("successfully synced hostendpoint")
+		return nil
+	}
+	return fmt.Errorf("too many retries while syncing hostendpoint %q", hepName)
+}
 
+// syncAutoHostendpoints ensures that the expected auto hostendpoints exist.
+func (c *NodeController) syncAutoHostendpoints() error {
+	autoHeps, err := c.listAutoHostendpoints()
+	if err != nil {
+		return err
+	}
+
+	// Delete any auto hostendpoints that:
+	// - reference a Calico node that doesn't exist
+	// - remain after autoHostEndpoints has been disabled
+	for _, hep := range autoHeps {
+		_, hepNodeExists := c.nodeCache[hep.Spec.Node]
+
+		if !hepNodeExists || !c.autoHostEndpoints {
+			err := c.deleteHostendpoint(hep.Name)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// For every Calico node in our cache, create/update the auto hostendpoint
+	// for it.
+	if c.autoHostEndpoints {
+		for _, node := range c.nodeCache {
+			err := c.syncHostendpoint(node)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// listAutoHostendpoints returns a map of auto hostendpoints keyed by the
+// hostendpoint's name.
+func (c *NodeController) listAutoHostendpoints() (map[string]api.HostEndpoint, error) {
+	for n := 0; n < 5; n++ {
+		heps, err := c.calicoClient.HostEndpoints().List(c.ctx, options.ListOptions{})
+		if err != nil {
+			log.WithError(err).Warn("could not list host endpoints, retrying")
+			time.Sleep(retrySleepTime)
+			continue
+		}
+		m := make(map[string]api.HostEndpoint)
+		for _, h := range heps.Items {
+			if isAutoHostendpoint(&h) {
+				m[h.Name] = h
+			}
+		}
+		return m, nil
+	}
+	return nil, fmt.Errorf("too many retries while listing hostendpoints")
+}
+
+// deleteHostendpoint removes the specified hostendpoint.
+func (c *NodeController) deleteHostendpoint(hepName string) error {
+	// On failure, we retry a certain number of times.
+	for n := 0; n < 5; n++ {
 		time.Sleep(c.rl.When(RateLimitCalicoDelete))
-		_, err = c.calicoClient.HostEndpoints().Delete(c.ctx, hepName, options.DeleteOptions{})
+		_, err := c.calicoClient.HostEndpoints().Delete(c.ctx, hepName, options.DeleteOptions{})
 		if err != nil {
 			switch err.(type) {
 			// If the hostendpoint does not exist, we will retry anyways since
 			// the Calico node may have been created then deleted immediately
 			// afterwards such that the hostendpoint wasn't created yet.
 			case errors.ErrorResourceDoesNotExist:
-				log.Warnf("could not delete host endpoint %q for node %q because it does not exist, retrying", hepName, nodeName)
+				log.Warnf("could not delete host endpoint %q because it does not exist, retrying", hepName)
 				continue
 			default:
-				log.Warnf("could not delete host endpoint for node %q: %v", nodeName, err)
+				log.WithError(err).Warnf("could not delete host endpoint %q", hepName)
 				continue
 			}
 		}
 		c.rl.Forget(RateLimitCalicoDelete)
 
-		log.Infof("deleted hostendpoint %q for node %q", hepName, nodeName)
-		return
+		log.Infof("deleted hostendpoint %q", hepName)
+		return nil
 	}
 
-	log.Warnf("too many retries when deleting hostendpoint %q", hepName)
+	return fmt.Errorf("too many retries when deleting hostendpoint %q", hepName)
 }

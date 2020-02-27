@@ -15,6 +15,9 @@
 package node
 
 import (
+	"os"
+
+	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
@@ -37,6 +40,23 @@ func (c *NodeController) initSyncer() {
 
 func (c *NodeController) OnStatusUpdated(status bapi.SyncStatus) {
 	logrus.Infof("Node controller syncer status updated: %s", status)
+	c.syncStatus = status
+
+	switch status {
+	case bapi.ResyncInProgress:
+		// Starting the resync so clear our node cache.
+		c.nodeCache = make(map[string]*api.Node)
+
+	case bapi.InSync:
+		err := c.syncAutoHostendpoints()
+		exitOnError(err)
+	}
+}
+
+func exitOnError(err error) {
+	if err != nil {
+		os.Exit(1)
+	}
 }
 
 func (c *NodeController) OnUpdates(updates []bapi.Update) {
@@ -72,7 +92,14 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 			}
 
 			if c.autoHostEndpoints {
-				c.syncHostendpoint(n)
+				// During resync, cache all updated nodes. If we're already in-sync,
+				// sync the node's auto hostendpoint.
+				if c.syncStatus == bapi.ResyncInProgress {
+					c.nodeCache[n.Name] = n
+				} else if c.syncStatus == bapi.InSync {
+					err := c.syncHostendpoint(n)
+					exitOnError(err)
+				}
 			}
 
 		case bapi.UpdateTypeKVDeleted:
@@ -80,12 +107,12 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 				logrus.Warnf("KVPair value should be nil for Deleted UpdataType")
 			}
 
-			n := upd.KVPair.Key.(model.ResourceKey).Name
+			nodeName := upd.KVPair.Key.(model.ResourceKey).Name
 
 			// Try to perform unmapping based on resource name (calico node name).
 			if c.syncLabels {
 				for kn, cn := range c.nodemapper {
-					if cn == n {
+					if cn == nodeName {
 						// Remove it from node map.
 						logrus.Debugf("Unmapping k8s node -> calico node. %s -> %s", kn, cn)
 						c.nodemapLock.Lock()
@@ -97,7 +124,9 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 			}
 
 			if c.autoHostEndpoints {
-				c.deleteHostendpoint(n)
+				hepName := c.generateHostendpointName(nodeName)
+				err := c.deleteHostendpoint(hepName)
+				exitOnError(err)
 			}
 
 		default:
