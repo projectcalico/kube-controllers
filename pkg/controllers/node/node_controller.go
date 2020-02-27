@@ -205,9 +205,9 @@ func isAutoHostendpoint(h *api.HostEndpoint) bool {
 	return ok && v == hepCreatedLabelValue
 }
 
-// createHostendpoint creates an auto hostendpoint for the specified node.
-func (c *NodeController) createHostendpoint(n *api.Node) (*api.HostEndpoint, error) {
-	hep := c.generateHostendpointFromNode(n)
+// createAutoHostendpoint creates an auto hostendpoint for the specified node.
+func (c *NodeController) createAutoHostendpoint(n *api.Node) (*api.HostEndpoint, error) {
+	hep := c.generateAutoHostendpointFromNode(n)
 
 	time.Sleep(c.rl.When(RateLimitCalicoCreate))
 	res, err := c.calicoClient.HostEndpoints().Create(c.ctx, hep, options.SetOptions{})
@@ -231,14 +231,14 @@ func kick(c chan<- interface{}) {
 	}
 }
 
-// generateHostendpointName returns the auto hostendpoint's name.
-func (c *NodeController) generateHostendpointName(nodeName string) string {
+// generateAutoHostendpointName returns the auto hostendpoint's name.
+func (c *NodeController) generateAutoHostendpointName(nodeName string) string {
 	return fmt.Sprintf("%s-auto-hep", nodeName)
 }
 
-// getHostendpointExpectedIPs returns all of the known IPs on the node resource
+// getAutoHostendpointExpectedIPs returns all of the known IPs on the node resource
 // that should set on the auto hostendpoint.
-func (c *NodeController) getHostendpointExpectedIPs(node *api.Node) []string {
+func (c *NodeController) getAutoHostendpointExpectedIPs(node *api.Node) []string {
 	expectedIPs := []string{}
 	if node.Spec.BGP != nil {
 		// BGP IPv4 and IPv6 addresses are CIDRs.
@@ -260,9 +260,9 @@ func (c *NodeController) getHostendpointExpectedIPs(node *api.Node) []string {
 	return expectedIPs
 }
 
-// generateHostendpointFromNode returns the expected auto hostendpoint to be
+// generateAutoHostendpointFromNode returns the expected auto hostendpoint to be
 // created from the given node.
-func (c *NodeController) generateHostendpointFromNode(node *api.Node) *api.HostEndpoint {
+func (c *NodeController) generateAutoHostendpointFromNode(node *api.Node) *api.HostEndpoint {
 	hepLabels := make(map[string]string, len(node.Labels)+1)
 	for k, v := range node.Labels {
 		hepLabels[k] = v
@@ -271,13 +271,13 @@ func (c *NodeController) generateHostendpointFromNode(node *api.Node) *api.HostE
 
 	return &api.HostEndpoint{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   c.generateHostendpointName(node.Name),
+			Name:   c.generateAutoHostendpointName(node.Name),
 			Labels: hepLabels,
 		},
 		Spec: api.HostEndpointSpec{
 			Node:          node.Name,
 			InterfaceName: "*",
-			ExpectedIPs:   c.getHostendpointExpectedIPs(node),
+			ExpectedIPs:   c.getAutoHostendpointExpectedIPs(node),
 		},
 	}
 }
@@ -313,23 +313,23 @@ func (c *NodeController) updateHostendpoint(current *api.HostEndpoint, expected 
 	return nil
 }
 
-// syncHostendpoint syncs the auto hostendpoint for the given node, optionally
+// syncAutoHostendpoint syncs the auto hostendpoint for the given node, optionally
 // retrying the operation a few times until it succeeds.
-func (c *NodeController) syncHostendpoint(node *api.Node, attemptRetries bool) error {
-	hepName := c.generateHostendpointName(node.Name)
+func (c *NodeController) syncAutoHostendpoint(node *api.Node, attemptRetries bool) error {
+	hepName := c.generateAutoHostendpointName(node.Name)
 
-	// On failure, we retry a certain number of times.
+	// On failure, we retry a certain number of times if attempRetries.
 	for n := 1; n <= 5; n++ {
 		log.Debugf("syncing hostendpoint %q from node %+v. attempt #%v", hepName, node, n)
 
 		// Try getting the host endpoint.
-		expectedHep := c.generateHostendpointFromNode(node)
+		expectedHep := c.generateAutoHostendpointFromNode(node)
 		currentHep, err := c.calicoClient.HostEndpoints().Get(c.ctx, hepName, options.GetOptions{})
 		if err != nil {
 			switch err.(type) {
 			case errors.ErrorResourceDoesNotExist:
 				log.Infof("host endpoint %q doesn't exist, creating it", node.Name)
-				_, err := c.createHostendpoint(node)
+				_, err := c.createAutoHostendpoint(node)
 				if err != nil {
 					log.WithError(err).Warnf("failed to create host endpoint %q", node.Name)
 					if !attemptRetries {
@@ -361,8 +361,8 @@ func (c *NodeController) syncHostendpoint(node *api.Node, attemptRetries bool) e
 	return fmt.Errorf("too many retries while syncing hostendpoint %q", hepName)
 }
 
-// syncAutoHostendpoints ensures that the expected auto hostendpoints exist.
-func (c *NodeController) syncAutoHostendpoints() error {
+// syncAllAutoHostendpoints ensures that the expected auto hostendpoints exist.
+func (c *NodeController) syncAllAutoHostendpoints() error {
 	autoHeps, err := c.listAutoHostendpoints()
 	if err != nil {
 		return err
@@ -386,7 +386,7 @@ func (c *NodeController) syncAutoHostendpoints() error {
 	// for it.
 	if c.autoHostEndpoints {
 		for _, node := range c.nodeCache {
-			err := c.syncHostendpoint(node, false)
+			err := c.syncAutoHostendpoint(node, false)
 			if err != nil {
 				return err
 			}
