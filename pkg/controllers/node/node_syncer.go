@@ -92,11 +92,11 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 			}
 
 			if c.autoHostEndpoints {
-				// During resync, cache all updated nodes. If we're already in-sync,
-				// sync the node's auto hostendpoint.
-				if c.syncStatus == bapi.ResyncInProgress {
-					c.nodeCache[n.Name] = n
-				} else if c.syncStatus == bapi.InSync {
+				// Cache all updated nodes.
+				c.nodeCache[n.Name] = n
+
+				// If we're already in-sync, sync the node's auto hostendpoint.
+				if c.syncStatus == bapi.InSync {
 					err := c.syncHostendpoint(n)
 					exitOnError(err)
 				}
