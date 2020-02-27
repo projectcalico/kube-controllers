@@ -91,7 +91,7 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 
 				// If we're already in-sync, sync the node's auto hostendpoint.
 				if c.syncStatus == bapi.InSync {
-					err := c.syncHostendpoint(n)
+					err := c.syncHostendpoint(n, true)
 					if err != nil {
 						logrus.WithError(err).Fatal()
 					}

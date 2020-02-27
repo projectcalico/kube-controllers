@@ -313,13 +313,15 @@ func (c *NodeController) updateHostendpoint(current *api.HostEndpoint, expected 
 	return nil
 }
 
-// syncHostendpoint syncs the auto hostendpoint for the given node.
-func (c *NodeController) syncHostendpoint(node *api.Node) error {
+// syncHostendpoint syncs the auto hostendpoint for the given node, optionally
+// retrying the operation a few times until it succeeds.
+func (c *NodeController) syncHostendpoint(node *api.Node, attemptRetries bool) error {
 	hepName := c.generateHostendpointName(node.Name)
-	log.Debugf("syncing hostendpoint %q from node %+v", hepName, node)
 
 	// On failure, we retry a certain number of times.
-	for n := 0; n < 5; n++ {
+	for n := 1; n <= 5; n++ {
+		log.Debugf("syncing hostendpoint %q from node %+v. attempt #%v", hepName, node, n)
+
 		// Try getting the host endpoint.
 		expectedHep := c.generateHostendpointFromNode(node)
 		currentHep, err := c.calicoClient.HostEndpoints().Get(c.ctx, hepName, options.GetOptions{})
@@ -329,17 +331,26 @@ func (c *NodeController) syncHostendpoint(node *api.Node) error {
 				log.Infof("host endpoint %q doesn't exist, creating it", node.Name)
 				_, err := c.createHostendpoint(node)
 				if err != nil {
-					log.WithError(err).Warnf("failed to create host endpoint %q, retrying", node.Name)
+					log.WithError(err).Warnf("failed to create host endpoint %q", node.Name)
+					if !attemptRetries {
+						return err
+					}
 					time.Sleep(retrySleepTime)
 					continue
 				}
 			default:
-				log.WithError(err).Warnf("failed to get host endpoint %q, retrying", node.Name)
+				log.WithError(err).Warnf("failed to get host endpoint %q", node.Name)
+				if !attemptRetries {
+					return err
+				}
 				time.Sleep(retrySleepTime)
 				continue
 			}
 		} else if err := c.updateHostendpoint(currentHep, expectedHep); err != nil {
-			log.WithError(err).Warnf("failed to update hostendpoint %q, retrying", currentHep.Name)
+			if !attemptRetries {
+				return err
+			}
+			log.WithError(err).Warnf("failed to update hostendpoint %q", currentHep.Name)
 			time.Sleep(retrySleepTime)
 			continue
 		}
@@ -375,7 +386,7 @@ func (c *NodeController) syncAutoHostendpoints() error {
 	// for it.
 	if c.autoHostEndpoints {
 		for _, node := range c.nodeCache {
-			err := c.syncHostendpoint(node)
+			err := c.syncHostendpoint(node, false)
 			if err != nil {
 				return err
 			}
