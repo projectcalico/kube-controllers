@@ -114,20 +114,20 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Expect the node label to sync.
-		expected := map[string]string{"label1": "value1", "calico-label": "calico-value"}
-		Eventually(func() error { return testutils.ExpectNodeLabels(c, expected, cNodeName) },
+		expectedNodeLabels := map[string]string{"label1": "value1", "calico-label": "calico-value"}
+		Eventually(func() error { return testutils.ExpectNodeLabels(c, expectedNodeLabels, cNodeName) },
 			time.Second*15, 500*time.Millisecond).Should(BeNil())
 
 		expectedHepName := cn.Name + "-auto-hep"
 
 		// Expect a wildcard hostendpoint to be created.
-		expectedLabels := map[string]string{
+		expectedHepLabels := map[string]string{
 			"label1":                       "value1",
 			"calico-label":                 "calico-value",
 			"projectcalico.org/created-by": "calico-kube-controllers",
 		}
 		expectedIPs := []string{"172.16.1.1", "fe80::1", "192.168.100.1"}
-		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedLabels, expectedIPs) },
+		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedHepLabels, expectedIPs) },
 			time.Second*15, 500*time.Millisecond).Should(BeNil())
 
 		// Update the Kubernetes node labels.
@@ -138,13 +138,13 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Expect the node labels to sync.
-		expected = map[string]string{"label1": "value2", "calico-label": "calico-value"}
-		Eventually(func() error { return testutils.ExpectNodeLabels(c, expected, cNodeName) },
+		expectedNodeLabels = map[string]string{"label1": "value2", "calico-label": "calico-value"}
+		Eventually(func() error { return testutils.ExpectNodeLabels(c, expectedNodeLabels, cNodeName) },
 			time.Second*15, 500*time.Millisecond).Should(BeNil())
 
 		// Expect the hostendpoint labels to sync.
-		expectedLabels["label1"] = "value2"
-		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedLabels, expectedIPs) },
+		expectedHepLabels["label1"] = "value2"
+		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedHepLabels, expectedIPs) },
 			time.Second*15, 500*time.Millisecond).Should(BeNil())
 
 		// Update the Calico node with new IPs.
@@ -158,7 +158,7 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 
 		// Expect the hostendpoint's expectedIPs to sync the new node IPs.
 		expectedIPs = []string{"172.100.2.3", "fe80::1", "10.10.20.1"}
-		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedLabels, expectedIPs) },
+		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedHepLabels, expectedIPs) },
 			time.Second*15, 500*time.Millisecond).Should(BeNil())
 
 		// Delete the Kubernetes node.
@@ -244,12 +244,12 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		// Expect an auto hostendpoint was created for the Calico node.
 		autoHepName := cNodeName + "-auto-hep"
 		expectedIPs := []string{"172.16.1.1", "fe80::1", "192.168.100.1"}
-		expectedLabels := map[string]string{
+		expectedHepLabels := map[string]string{
 			"auto":                         "hep",
 			"projectcalico.org/created-by": "calico-kube-controllers",
 		}
 		Eventually(func() error {
-			return testutils.ExpectHostendpoint(c, autoHepName, expectedLabels, expectedIPs)
+			return testutils.ExpectHostendpoint(c, autoHepName, expectedHepLabels, expectedIPs)
 		}, time.Second*15, 500*time.Millisecond).Should(BeNil())
 	})
 
@@ -292,12 +292,12 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 
 		// Expect a wildcard hostendpoint to be created.
 		expectedIPs := []string{"172.16.1.1", "fe80::1", "192.168.100.1"}
-		expectedLabels := map[string]string{
+		expectedHepLabels := map[string]string{
 			"label1":                       "value1",
 			"calico-label":                 "calico-value",
 			"projectcalico.org/created-by": "calico-kube-controllers",
 		}
-		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedLabels, expectedIPs) },
+		Eventually(func() error { return testutils.ExpectHostendpoint(c, expectedHepName, expectedHepLabels, expectedIPs) },
 			time.Second*15, 500*time.Millisecond).Should(BeNil())
 
 		// Restart the controller but with auto hostendpoints disabled.
