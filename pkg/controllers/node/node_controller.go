@@ -115,11 +115,11 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	// also syncs up labels between k8s/calico node objects
 	nc.indexer, nc.informer = cache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, handlers, cache.Indexers{})
 
-	if nc.syncLabels || nc.autoHostEndpoints {
-		// Start the syncer.
-		nc.initSyncer()
-		nc.syncer.Start()
-	}
+	// Start the syncer. We always need to run this to manage auto
+	// hostendpoints: if autoHostEndpoints was enabled then disabled later on
+	// then we need to remove the leftover auto heps.
+	nc.initSyncer()
+	nc.syncer.Start()
 
 	return nc
 }
