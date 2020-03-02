@@ -99,7 +99,7 @@ func (c *NodeController) syncAutoHostendpoint(node *api.Node) error {
 		return err
 	}
 
-	log.WithField("hostendpoint", node.Name).Info("successfully synced hostendpoint")
+	log.WithField("hep.Name", expectedHep.Name).Info("successfully synced hostendpoint")
 	return nil
 }
 
@@ -240,20 +240,28 @@ func (c *NodeController) generateAutoHostendpointFromNode(node *api.Node) *api.H
 // hostendpointNeedsUpdate returns true if the current automatic hostendpoint
 // needs to be updated.
 func (c *NodeController) hostendpointNeedsUpdate(current *api.HostEndpoint, expected *api.HostEndpoint) bool {
+	log.Debugf("checking if hostendpoint needs update\ncurrent: %#v\nexpected: %#v", current, expected)
 	if !reflect.DeepEqual(current.Labels, expected.Labels) {
+		log.WithField("hep.Name", current.Name).Debug("hostendpoint needs update because of labels")
 		return true
 	}
 	if !reflect.DeepEqual(current.Spec.ExpectedIPs, expected.Spec.ExpectedIPs) {
+		log.WithField("hep.Name", current.Name).Debug("hostendpoint needs update because of expectedIPs")
 		return true
 	}
-	return current.Spec.InterfaceName != expected.Spec.InterfaceName
+	if current.Spec.InterfaceName != expected.Spec.InterfaceName {
+		log.WithField("hep.Name", current.Name).Debug("hostendpoint needs update because of interfaceName")
+		return true
+	}
+	log.WithField("hep.Name", current.Name).Debug("hostendpoint does not need update")
+	return false
 }
 
 // updateHostendpoint updates the current hostendpoint so that it matches the
 // expected hostendpoint.
 func (c *NodeController) updateHostendpoint(current *api.HostEndpoint, expected *api.HostEndpoint) error {
 	if c.hostendpointNeedsUpdate(current, expected) {
-		log.WithField("hostendpoint", current.Name).Debug("hostendpoint needs update")
+		log.WithField("hep.Name", current.Name).Debug("hostendpoint needs update")
 		expected.ResourceVersion = current.ResourceVersion
 		expected.ObjectMeta.CreationTimestamp = current.ObjectMeta.CreationTimestamp
 		expected.ObjectMeta.UID = current.ObjectMeta.UID
@@ -265,5 +273,6 @@ func (c *NodeController) updateHostendpoint(current *api.HostEndpoint, expected 
 		}
 		return err
 	}
+	log.WithField("hep.Name", current.Name).Debug("hostendpoint not updated")
 	return nil
 }
