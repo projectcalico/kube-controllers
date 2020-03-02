@@ -52,34 +52,31 @@ var (
 // NodeController implements the Controller interface.  It is responsible for monitoring
 // kubernetes nodes and responding to delete events by removing them from the Calico datastore.
 type NodeController struct {
-	ctx               context.Context
-	informer          cache.Controller
-	indexer           cache.Indexer
-	calicoClient      client.Interface
-	k8sClientset      *kubernetes.Clientset
-	rl                workqueue.RateLimiter
-	schedule          chan interface{}
-	nodemapper        map[string]string
-	nodemapLock       sync.Mutex
-	syncer            bapi.Syncer
-	config            *config.Config
-	syncLabels        bool
-	autoHostEndpoints bool
-	nodeCache         map[string]*api.Node
-	syncStatus        bapi.SyncStatus
+	ctx          context.Context
+	informer     cache.Controller
+	indexer      cache.Indexer
+	calicoClient client.Interface
+	k8sClientset *kubernetes.Clientset
+	rl           workqueue.RateLimiter
+	schedule     chan interface{}
+	nodemapper   map[string]string
+	nodemapLock  sync.Mutex
+	syncer       bapi.Syncer
+	config       *config.Config
+	nodeCache    map[string]*api.Node
+	syncStatus   bapi.SyncStatus
 }
 
 // NewNodeController Constructor for NodeController
 func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, calicoClient client.Interface, cfg *config.Config) controller.Controller {
 	nc := &NodeController{
-		ctx:               ctx,
-		calicoClient:      calicoClient,
-		k8sClientset:      k8sClientset,
-		rl:                workqueue.DefaultControllerRateLimiter(),
-		nodemapper:        map[string]string{},
-		config:            cfg,
-		autoHostEndpoints: cfg.AutoHostEndpoints == "enabled",
-		nodeCache:         make(map[string]*api.Node),
+		ctx:          ctx,
+		calicoClient: calicoClient,
+		k8sClientset: k8sClientset,
+		rl:           workqueue.DefaultControllerRateLimiter(),
+		nodemapper:   map[string]string{},
+		config:       cfg,
+		nodeCache:    make(map[string]*api.Node),
 	}
 
 	// channel used to kick the controller into scheduling a sync. It has length
@@ -99,9 +96,7 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 		}}
 
 	// Determine if we should sync node labels.
-	nc.syncLabels = cfg.SyncNodeLabels && cfg.DatastoreType != "kubernetes"
-
-	if nc.syncLabels {
+	if cfg.SyncNodeLabels && cfg.DatastoreType != "kubernetes" {
 		// Add handlers for node add/update events from k8s.
 		handlers.AddFunc = func(obj interface{}) {
 			nc.syncNodeLabels(obj.(*v1.Node))
