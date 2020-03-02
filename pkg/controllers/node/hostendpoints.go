@@ -28,6 +28,36 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// deleteAutoHostendpointsWithoutNodes deletes auto hostendpoints that either
+// reference a Calico node that doesn't exist, or, that remain after
+// autoHostEndpoints has been disabled.
+func (c *NodeController) deleteAutoHostendpointsWithoutNodes(heps map[string]api.HostEndpoint) error {
+	for _, hep := range heps {
+		_, hepNodeExists := c.nodeCache[hep.Spec.Node]
+
+		if !hepNodeExists || !c.autoHostEndpoints {
+			err := c.deleteHostendpoint(hep.Name)
+			if err != nil {
+				log.WithError(err).Warnf("failed to delete hostendpoint %q", hep.Name)
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// createUpdateAutohostendpoints creates or updates all auto hostendpoints.
+func (c *NodeController) createUpdateAutohostendpoints() error {
+	for _, node := range c.nodeCache {
+		err := c.syncAutoHostendpoint(node)
+		if err != nil {
+			log.WithError(err).Warnf("failed to sync hostendpoint for node %q", node.Name)
+			return err
+		}
+	}
+	return nil
+}
+
 // syncAllAutoHostendpoints ensures that the expected auto hostendpoints exist,
 func (c *NodeController) syncAllAutoHostendpoints() error {
 	for n := 1; n <= 5; n++ {
@@ -39,32 +69,20 @@ func (c *NodeController) syncAllAutoHostendpoints() error {
 			continue
 		}
 
-		// Delete any auto hostendpoints that:
-		// - reference a Calico node that doesn't exist
-		// - remain after autoHostEndpoints has been disabled
-		for _, hep := range autoHeps {
-			_, hepNodeExists := c.nodeCache[hep.Spec.Node]
-
-			if !hepNodeExists || !c.autoHostEndpoints {
-				err := c.deleteHostendpoint(hep.Name)
-				if err != nil {
-					log.WithError(err).Warnf("failed to delete hostendpoint %q", hep.Name)
-					time.Sleep(retrySleepTime)
-					continue
-				}
-			}
+		// Delete any dangling auto hostendpoints
+		if err := c.deleteAutoHostendpointsWithoutNodes(autoHeps); err != nil {
+			log.WithError(err).Warn("failed to delete dangling hostendpoints")
+			time.Sleep(retrySleepTime)
+			continue
 		}
 
 		// For every Calico node in our cache, create/update the auto hostendpoint
 		// for it.
 		if c.autoHostEndpoints {
-			for _, node := range c.nodeCache {
-				err := c.syncAutoHostendpoint(node)
-				if err != nil {
-					log.WithError(err).Warnf("failed to sync hostendpoint for node %q", node.Name)
-					time.Sleep(retrySleepTime)
-					continue
-				}
+			if err := c.createUpdateAutohostendpoints(); err != nil {
+				log.WithError(err).Warn("failed to sync hostendpoint for nodes")
+				time.Sleep(retrySleepTime)
+				continue
 			}
 		}
 
