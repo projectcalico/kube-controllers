@@ -1,3 +1,5 @@
+[![Go Report Card](https://goreportcard.com/badge/github.com/projectcalico/kube-controllers)](https://goreportcard.com/report/github.com/projectcalico/kube-controllers)
+
 # Calico Controllers for Kubernetes
 <img src="http://docs.projectcalico.org/images/felix.png" width="100" height="100">
 
