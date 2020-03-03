@@ -226,9 +226,9 @@ var _ = Describe("NetworkPolicy conversion tests", func() {
 					MatchLabels: map[string]string{"label": "value"},
 				},
 				Ingress: []networkingv1.NetworkPolicyIngressRule{
-					networkingv1.NetworkPolicyIngressRule{
+					{
 						From: []networkingv1.NetworkPolicyPeer{
-							networkingv1.NetworkPolicyPeer{
+							{
 								NamespaceSelector: &metav1.LabelSelector{
 									MatchLabels: map[string]string{},
 								},
