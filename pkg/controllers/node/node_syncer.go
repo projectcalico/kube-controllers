@@ -48,7 +48,7 @@ func (c *NodeController) OnStatusUpdated(status bapi.SyncStatus) {
 	case bapi.InSync:
 		err := c.syncAllAutoHostendpoints()
 		if err != nil {
-			logrus.WithError(err).Fatal()
+			logrus.WithError(err).Fatal("failed to sync all auto hostendpoints")
 		}
 	}
 }

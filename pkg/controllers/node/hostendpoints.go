@@ -103,21 +103,17 @@ func (c *NodeController) syncAutoHostendpoint(node *api.Node) error {
 	if err != nil {
 		switch err.(type) {
 		case errors.ErrorResourceDoesNotExist:
-			log.Infof("host endpoint %q doesn't exist, creating it", node.Name)
 			if _, err := c.createAutoHostendpoint(node); err != nil {
-				log.WithError(err).Warnf("failed to create host endpoint %q, retrying", node.Name)
 				return err
 			}
 		default:
-			log.WithError(err).Warnf("failed to get host endpoint %q, retrying", node.Name)
 			return err
 		}
 	} else if err := c.updateHostendpoint(currentHep, expectedHep); err != nil {
-		log.WithError(err).Warnf("failed to update hostendpoint %q, retrying", currentHep.Name)
 		return err
 	}
 
-	log.WithField("hep.Name", expectedHep.Name).Info("successfully synced hostendpoint")
+	log.WithField("hep.Name", expectedHep.Name).Debug("successfully synced hostendpoint")
 	return nil
 }
 
