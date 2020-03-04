@@ -170,9 +170,15 @@ func (c *NodeController) deleteHostendpointWithRetries(hepName string) error {
 	for n := 1; n <= 5; n++ {
 		log.Debugf("deleting hostendpoint %q. attempt #%v", hepName, n)
 		if err := c.deleteHostendpoint(hepName); err != nil {
-			log.WithError(err).Infof("failed to delete host endpoint %q, retrying", hepName)
-			time.Sleep(retrySleepTime)
-			continue
+			switch err.(type) {
+			case errors.ErrorResourceDoesNotExist:
+				log.Infof("did not delete hostendpoint %q beacuse it doesn't exist", hepName)
+				return nil
+			default:
+				log.WithError(err).Infof("failed to delete host endpoint %q, retrying", hepName)
+				time.Sleep(retrySleepTime)
+				continue
+			}
 		}
 		return nil
 	}
