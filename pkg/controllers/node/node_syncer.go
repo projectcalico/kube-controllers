@@ -119,7 +119,7 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 				}
 			}
 
-			if c.config.AutoHostEndpoints == "enabled" {
+			if c.config.AutoHostEndpoints == "enabled" && c.syncStatus == bapi.InSync {
 				hepName := c.generateAutoHostendpointName(nodeName)
 				err := c.deleteHostendpointWithRetries(hepName)
 				if err != nil {
