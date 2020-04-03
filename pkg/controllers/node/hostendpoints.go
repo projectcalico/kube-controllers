@@ -28,6 +28,44 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	defaultProfileName = "allow"
+)
+
+// createAllowProfile creates an allow-all profile  that is used by
+// the hostendpoints created by this controller. This is only done for etcd
+// backed clusters (for kubernetes datastore, we just return the kvp defined in
+// libcalico-go).
+func (c *NodeController) createAllowProfile() error {
+	if c.config.DatastoreType != "kubernetes" {
+		// If the profile already exists just return.
+		if _, err := c.calicoClient.Profiles().Get(context.Background(), defaultProfileName, options.GetOptions{}); err == nil {
+			return nil
+		}
+
+		profile := api.NewProfile()
+		profile.ObjectMeta = metav1.ObjectMeta{
+			Name: defaultProfileName,
+		}
+		profile.Spec = api.ProfileSpec{
+			Ingress: []api.Rule{{Action: api.Allow}},
+			Egress:  []api.Rule{{Action: api.Allow}},
+		}
+
+		for n := 1; n <= 5; n++ {
+			log.Debugf("creating %q profile. attempt #%v", defaultProfileName, n)
+			if _, err := c.calicoClient.Profiles().Create(context.Background(), profile, options.SetOptions{}); err != nil {
+				log.WithError(err).Infof("failed to create %q profile, retrying", defaultProfileName)
+				time.Sleep(retrySleepTime)
+				continue
+			}
+			return nil
+		}
+		return fmt.Errorf("too many retries when creating default profile")
+	}
+	return nil
+}
+
 // deleteAutoHostendpointsWithoutNodes deletes auto hostendpoints that either
 // reference a Calico node that doesn't exist, or, that remain after
 // autoHostEndpoints has been disabled.
@@ -253,6 +291,7 @@ func (c *NodeController) generateAutoHostendpointFromNode(node *api.Node) *api.H
 			Node:          node.Name,
 			InterfaceName: "*",
 			ExpectedIPs:   c.getAutoHostendpointExpectedIPs(node),
+			Profiles:      []string{defaultProfileName},
 		},
 	}
 }

@@ -16,6 +16,7 @@ package node
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
 
@@ -79,6 +80,11 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 		nodeCache:    make(map[string]*api.Node),
 	}
 
+	// Create a default profile for auto hostendpoints
+	err := nc.createAllowProfile()
+	if err != nil {
+		os.Exit(1)
+	}
 	// channel used to kick the controller into scheduling a sync. It has length
 	// 1 so that we coalesce multiple kicks while a sync is happening down to
 	// just one additional sync.

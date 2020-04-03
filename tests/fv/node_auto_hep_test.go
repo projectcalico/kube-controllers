@@ -96,6 +96,9 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		// Run controller with auto HEP enabled
 		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), true)
 
+		_, err := c.Profiles().Get(context.Background(), "allow", options.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
 		// Create a kubernetes node with some labels.
 		kn := &v1.Node{
 			ObjectMeta: metav1.ObjectMeta{
@@ -105,7 +108,7 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 				},
 			},
 		}
-		_, err := k8sClient.CoreV1().Nodes().Create(kn)
+		_, err = k8sClient.CoreV1().Nodes().Create(kn)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Create a Calico node with a reference to it.

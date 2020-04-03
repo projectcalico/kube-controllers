@@ -76,9 +76,11 @@ func ExpectHostendpoint(c client.Interface, hepName string, expectedLabels map[s
 	if hep.Spec.InterfaceName != "*" {
 		return fmt.Errorf("expected all-interfaces hostendpoint. Expected: %q, Actual: %q", "*", hep.Spec.InterfaceName)
 	}
-	if len(hep.Spec.Profiles) > 0 {
-		return fmt.Errorf("expected profiles to be empty. Actual: %q", hep.Spec.Profiles)
+
+	if !reflect.DeepEqual(hep.Spec.Profiles, []string{"allow"}) {
+		return fmt.Errorf("expected profiles to consistent of the 'allow' profile. Actual: %q", hep.Spec.Profiles)
 	}
+
 	if len(hep.Spec.Ports) > 0 {
 		return fmt.Errorf("expected ports to be empty. Actual: %q", hep.Spec.Ports)
 	}
