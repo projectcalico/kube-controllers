@@ -67,7 +67,7 @@ func ExpectNodeLabels(c client.Interface, labels map[string]string, node string)
 	return nil
 }
 
-func ExpectHostendpoint(c client.Interface, hepName string, expectedLabels map[string]string, expectedIPs []string) error {
+func ExpectHostendpoint(c client.Interface, hepName string, expectedLabels map[string]string, expectedIPs, expectedProfiles []string) error {
 	hep, err := c.HostEndpoints().Get(context.Background(), hepName, options.GetOptions{})
 	if err != nil {
 		return err
@@ -77,8 +77,8 @@ func ExpectHostendpoint(c client.Interface, hepName string, expectedLabels map[s
 		return fmt.Errorf("expected all-interfaces hostendpoint. Expected: %q, Actual: %q", "*", hep.Spec.InterfaceName)
 	}
 
-	if !reflect.DeepEqual(hep.Spec.Profiles, []string{"allow"}) {
-		return fmt.Errorf("expected profiles to consistent of the 'allow' profile. Actual: %q", hep.Spec.Profiles)
+	if !reflect.DeepEqual(hep.Spec.Profiles, expectedProfiles) {
+		return fmt.Errorf("expected profiles to match. Actual: %q", hep.Spec.Profiles)
 	}
 
 	if len(hep.Spec.Ports) > 0 {
