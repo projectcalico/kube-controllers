@@ -156,4 +156,142 @@ var _ = Describe("kube-controllers IPAM FV tests (etcd mode)", func() {
 			return assertIPsWithHandle(c.IPAM(), handleA, 0)
 		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
 	})
+
+	It("should not garbage collect IP addresses if the corresponding node is not a Kubernetes node", func() {
+		// Run controller.
+		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), false)
+
+		// Use the same name for k8s and Calico node.
+		commonNodeName := "common-node-name"
+
+		// Create a kubernetes node.
+		kn := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: commonNodeName}}
+		_, err := k8sClient.CoreV1().Nodes().Create(kn)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create a Calico node without a node reference. Be extra tricky, by naming the calico node the
+		// same name as the Kubernetes node. This makes sure we're really using the orchRef properly.
+		cn := calicoNode(c, commonNodeName, "", map[string]string{})
+		_, err = c.Nodes().Create(context.Background(), cn, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Allocate an IP address on the Calico node.
+		handleA := "handleA"
+		attrs := map[string]string{"node": commonNodeName, "pod": "pod-a", "namespace": "default"}
+		err = c.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
+			IP: net.MustParseIP("192.168.0.1"), HandleID: &handleA, Attrs: attrs, Hostname: commonNodeName,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create and delete an unrelated Kubernetes node. This should trigger the controller
+		// to do a sync.
+		kn2 := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "other-node"}}
+		_, err = k8sClient.CoreV1().Nodes().Create(kn2)
+		Expect(err).NotTo(HaveOccurred())
+		err = k8sClient.CoreV1().Nodes().Delete(kn2.Name, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		// The IPAM allocation should be untouched.
+		Consistently(func() error {
+			return assertIPsWithHandle(c.IPAM(), handleA, 1)
+		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
+
+		// Delete the Kubernetes node with the same name as the Calico node.
+		err = k8sClient.CoreV1().Nodes().Delete(kn.Name, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		// The IPAM allocation should still be untouched, since the Calico node object
+		// doesn't have a linkage to the Kubernetes one.
+		Consistently(func() error {
+			return assertIPsWithHandle(c.IPAM(), handleA, 1)
+		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
+
+		// Now delete the Calico node object.
+		_, err = c.Nodes().Delete(context.Background(), cn.Name, options.DeleteOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create and delete an unrelated Kubernetes node. This should trigger the controller
+		// to do a sync.
+		// TODO: Right now we only trigger the controller off of k8s node events, not Calico node events.
+		_, err = k8sClient.CoreV1().Nodes().Create(kn2)
+		Expect(err).NotTo(HaveOccurred())
+		err = k8sClient.CoreV1().Nodes().Delete(kn2.Name, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Now the IP should have been cleaned up since the Calico node which owns the IP is gone.
+		Eventually(func() error {
+			return assertIPsWithHandle(c.IPAM(), handleA, 0)
+		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
+	})
+
+	// This tests a strange scenario where there is no Calico node matching the IPAM allocation data, but there IS a
+	// Kubernetes node that happens to have the same name. We don't make assumptions about similar names between Calico
+	// and Kubernetes node objects (the orchRefs tell all), but to be safe we leave the allocation in place.
+	It("should not garbage collect IP addresses if there is no Calico node, if there happens to be a Kubernetes node", func() {
+		// Run controller.
+		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), false)
+
+		// Create a kubernetes node.
+		commonNodeName := "common-node-name"
+		kn := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: commonNodeName}}
+		_, err := k8sClient.CoreV1().Nodes().Create(kn)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Allocate an IP address on a node that doesn't exist.
+		handleA := "handleA"
+		attrs := map[string]string{"node": commonNodeName, "pod": "pod-a", "namespace": "default"}
+		err = c.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
+			IP: net.MustParseIP("192.168.0.1"), HandleID: &handleA, Attrs: attrs, Hostname: commonNodeName,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create and delete an unrelated Kubernetes node. This should trigger the controller
+		// to do a sync.
+		kn2 := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "other-node"}}
+		_, err = k8sClient.CoreV1().Nodes().Create(kn2)
+		Expect(err).NotTo(HaveOccurred())
+		err = k8sClient.CoreV1().Nodes().Delete(kn2.Name, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		// The IPAM allocation should be intact.
+		Consistently(func() error {
+			return assertIPsWithHandle(c.IPAM(), handleA, 1)
+		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
+
+		// Delete the similarly named k8s node.
+		err = k8sClient.CoreV1().Nodes().Delete(kn.Name, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Now the allocation should be cleaned up.
+		Eventually(func() error {
+			return assertIPsWithHandle(c.IPAM(), handleA, 0)
+		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
+	})
+
+	It("should garbage collect IP addresses if there is no Calico node AND no Kubernetes node", func() {
+		// Run controller.
+		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), false)
+
+		// Allocate an IP address on a node that doesn't exist.
+		commonNodeName := "common-node-name"
+		handleA := "handleA"
+		attrs := map[string]string{"node": commonNodeName, "pod": "pod-a", "namespace": "default"}
+		err := c.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
+			IP: net.MustParseIP("192.168.0.1"), HandleID: &handleA, Attrs: attrs, Hostname: commonNodeName,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create and delete an unrelated Kubernetes node. This should trigger the controller
+		// to do a sync.
+		kn2 := &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "other-node"}}
+		_, err = k8sClient.CoreV1().Nodes().Create(kn2)
+		Expect(err).NotTo(HaveOccurred())
+		err = k8sClient.CoreV1().Nodes().Delete(kn2.Name, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		// The IP should have been cleaned up since it is not attached to any Kubernetes or Calico node.
+		Eventually(func() error {
+			return assertIPsWithHandle(c.IPAM(), handleA, 0)
+		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
+	})
 })

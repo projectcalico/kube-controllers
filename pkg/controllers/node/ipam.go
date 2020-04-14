@@ -87,6 +87,7 @@ func (c *NodeController) syncIPAMCleanup() error {
 				if kn == "" {
 					// If we can't determine a corresponding Kubernetes node for this allocation,
 					// we can't go any further. Move on to the next allocation.
+					logrus.WithField("calicoNode", val).Info("Could not find corresponding k8s node for allocation, skip")
 					continue
 				}
 				if _, ok := nodes[kn]; !ok {
@@ -268,12 +269,20 @@ func (c *NodeController) kubernetesNodeForCalico(cnode string) string {
 	calicoNode, err := c.calicoClient.Nodes().Get(context.TODO(), cnode, options.GetOptions{})
 	if err != nil {
 		if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
-			// No such calico node in either the Kubernetes API nor the Calico API.
-			// We should clean up the IP address, so return the input name to the calling code.
+			// The Calico node referenced in the IPAM data doesn't actually exist!
+			// We should clean this allocation up - return the provided cnode name to the calling
+			// code to indicate this.
+			//
+			// NOTE: If there happens to be a k8s node with the exact name as the missing Calico node,
+			// we won't clean up this address until the k8s node is removed. This is maybe extra cautious,
+			// but probably OK since we don't expect to ever be in a state where the Calico node
+			// has been deleted but the k8s node is still present in the API.
 			logrus.WithError(err).Warn("Unable to find Calico Node referenced in IPAM data")
 			return cnode
 		}
-		// Return empty string since we can't reasonably do anything in this case.
+
+		// Error querying the Calico node object.
+		// Return an empty string since we can't reasonably do anything in this case.
 		logrus.WithError(err).Warn("failed to query Calico Node referenced in IPAM data")
 		return ""
 	}
