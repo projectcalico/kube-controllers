@@ -60,8 +60,10 @@ func (c *NodeController) syncIPAMCleanup() error {
 		// if there are no IPs actually assigned to that node.
 		if b.Affinity != nil {
 			n := c.kubernetesNodeForCalico(strings.TrimPrefix(*b.Affinity, "host:"))
-			if _, ok := nodes[n]; !ok {
-				nodes[n] = []model.AllocationAttribute{}
+			if n != "" {
+				if _, ok := nodes[n]; !ok {
+					nodes[n] = []model.AllocationAttribute{}
+				}
 			}
 		}
 
@@ -79,6 +81,11 @@ func (c *NodeController) syncIPAMCleanup() error {
 			// Track nodes based on IP allocations.
 			if val, ok := attr.AttrSecondary[ipam.AttributeNode]; ok {
 				kn := c.kubernetesNodeForCalico(val)
+				if kn == "" {
+					// If we can't determine a corresponding Kubernetes node for this allocation,
+					// we can't go any further. Move on to the next allocation.
+					continue
+				}
 				if _, ok := nodes[kn]; !ok {
 					nodes[kn] = []model.AllocationAttribute{}
 				}
@@ -250,7 +257,11 @@ func (c *NodeController) kubernetesNodeForCalico(cnode string) string {
 			return kn
 		}
 	}
-	return cnode
+
+	// If we can't find a matching Kubernetes node, then we cannot do any work.
+	// This might mean that we are running behind and haven't learned about the node yet, or that
+	// the Calico node in question isn't actually part of the Kubernetes cluster.
+	return ""
 }
 
 func ordinalToIP(b *model.AllocationBlock, ord int) net.IP {
