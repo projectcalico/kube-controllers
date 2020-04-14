@@ -50,7 +50,8 @@ func (c *NodeController) syncIPAMCleanup() error {
 	c.rl.Forget(RateLimitCalicoList)
 
 	// Build a list of all the nodes in the cluster based on IPAM allocations across all
-	// blocks, plus affinities.
+	// blocks, plus affinities. Entries in the 'nodes' map will be indexed by the name of the
+	// node in the Kubernetes API.
 	nodes := map[string][]model.AllocationAttribute{}
 	for _, kvp := range blocks.KVPairs {
 		b := kvp.Value.(*model.AllocationBlock)
@@ -58,7 +59,7 @@ func (c *NodeController) syncIPAMCleanup() error {
 		// Include affinity if it exists. We want to track nodes even
 		// if there are no IPs actually assigned to that node.
 		if b.Affinity != nil {
-			n := strings.TrimPrefix(*b.Affinity, "host:")
+			n := c.kubernetesNodeForCalico(strings.TrimPrefix(*b.Affinity, "host:"))
 			if _, ok := nodes[n]; !ok {
 				nodes[n] = []model.AllocationAttribute{}
 			}
@@ -77,8 +78,9 @@ func (c *NodeController) syncIPAMCleanup() error {
 
 			// Track nodes based on IP allocations.
 			if val, ok := attr.AttrSecondary[ipam.AttributeNode]; ok {
-				if _, ok := nodes[val]; !ok {
-					nodes[val] = []model.AllocationAttribute{}
+				kn := c.kubernetesNodeForCalico(val)
+				if _, ok := nodes[kn]; !ok {
+					nodes[kn] = []model.AllocationAttribute{}
 				}
 
 				// If there is no handle, then skip this IP. We need the handle
@@ -96,11 +98,11 @@ func (c *NodeController) syncIPAMCleanup() error {
 
 				// Add this allocation to the node, so we can release it later if
 				// we need to.
-				nodes[val] = append(nodes[val], attr)
+				nodes[kn] = append(nodes[kn], attr)
 			}
 		}
 	}
-	log.Debugf("Nodes in IPAM: %v", nodes)
+	log.Debugf("Kubernetes nodes found in IPAM: %v", nodes)
 
 	// For storing any errors encountered below.
 	var storedErr error
@@ -206,6 +208,7 @@ func (c *NodeController) cleanupNode(node string, allocations []model.Allocation
 	return nil
 }
 
+// nodeExists returns true if the given node exists in the Kubernetes API, and false otherwise.
 func (c *NodeController) nodeExists(node string) bool {
 	_, err := c.k8sClientset.CoreV1().Nodes().Get(node, v1.GetOptions{})
 	if err != nil {
@@ -217,6 +220,8 @@ func (c *NodeController) nodeExists(node string) bool {
 	return true
 }
 
+// podExists returns if the given pod exists in the Kubernetes API and is on the provided Kubernetes node.
+// Note that the "node" parameter is the name of the Kubernetes node in the Kubernetes API.
 func (c *NodeController) podExists(name, ns, node string) bool {
 	n, err := c.k8sClientset.CoreV1().Pods(ns).Get(name, v1.GetOptions{})
 	if err != nil {
@@ -233,6 +238,19 @@ func (c *NodeController) podExists(name, ns, node string) bool {
 		return false
 	}
 	return true
+}
+
+// kubernetesNodeForCalico returns the name of the Kubernetes node that corresponds to this Calico node.
+func (c *NodeController) kubernetesNodeForCalico(cnode string) string {
+	c.nodemapLock.Lock()
+	defer c.nodemapLock.Unlock()
+
+	for kn, cn := range c.nodemapper {
+		if cn == cnode {
+			return kn
+		}
+	}
+	return cnode
 }
 
 func ordinalToIP(b *model.AllocationBlock, ord int) net.IP {
