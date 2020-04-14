@@ -15,6 +15,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"net"
@@ -25,6 +26,8 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
+	"github.com/projectcalico/libcalico-go/lib/options"
+	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -248,6 +251,7 @@ func (c *NodeController) podExists(name, ns, node string) bool {
 }
 
 // kubernetesNodeForCalico returns the name of the Kubernetes node that corresponds to this Calico node.
+// This function returns an empty string if no action should be taken for this node.
 func (c *NodeController) kubernetesNodeForCalico(cnode string) string {
 	c.nodemapLock.Lock()
 	defer c.nodemapLock.Unlock()
@@ -258,10 +262,25 @@ func (c *NodeController) kubernetesNodeForCalico(cnode string) string {
 		}
 	}
 
-	// If we can't find a matching Kubernetes node, then we cannot do any work.
-	// This might mean that we are running behind and haven't learned about the node yet, or that
-	// the Calico node in question isn't actually part of the Kubernetes cluster.
-	return ""
+	// If we can't find a matching Kubernetes node, try looking up the Calico node explicitly,
+	// since it's theoretically possible the nodemapper is just running behind the actual state of the
+	// data store.
+	calicoNode, err := c.calicoClient.Nodes().Get(context.TODO(), cnode, options.GetOptions{})
+	if err != nil {
+		if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
+			// No such calico node in either the Kubernetes API nor the Calico API.
+			// We should clean up the IP address, so return the input name to the calling code.
+			logrus.WithError(err).Warn("Unable to find Calico Node referenced in IPAM data")
+			return cnode
+		}
+		// Return empty string since we can't reasonably do anything in this case.
+		logrus.WithError(err).Warn("failed to query Calico Node referenced in IPAM data")
+		return ""
+	}
+
+	// Try to pull the k8s name from the retrieved Calico node object. If there is no match,
+	// this will return an empty string, correctly telling the calling code to ignore this allocation.
+	return getK8sNodeName(*calicoNode)
 }
 
 func ordinalToIP(b *model.AllocationBlock, ord int) net.IP {
