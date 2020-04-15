@@ -53,20 +53,17 @@ func (c *NodeController) syncIPAMCleanup() error {
 	c.rl.Forget(RateLimitCalicoList)
 
 	// Build a list of all the nodes in the cluster based on IPAM allocations across all
-	// blocks, plus affinities. Entries in the 'nodes' map will be indexed by the name of the
-	// node in the Kubernetes API.
-	nodes := map[string][]model.AllocationAttribute{}
+	// blocks, plus affinities. Entries are Calico node names.
+	calicoNodes := map[string][]model.AllocationAttribute{}
 	for _, kvp := range blocks.KVPairs {
 		b := kvp.Value.(*model.AllocationBlock)
 
 		// Include affinity if it exists. We want to track nodes even
 		// if there are no IPs actually assigned to that node.
 		if b.Affinity != nil {
-			n := c.kubernetesNodeForCalico(strings.TrimPrefix(*b.Affinity, "host:"))
-			if n != "" {
-				if _, ok := nodes[n]; !ok {
-					nodes[n] = []model.AllocationAttribute{}
-				}
+			n := strings.TrimPrefix(*b.Affinity, "host:")
+			if _, ok := calicoNodes[n]; !ok {
+				calicoNodes[n] = []model.AllocationAttribute{}
 			}
 		}
 
@@ -83,15 +80,8 @@ func (c *NodeController) syncIPAMCleanup() error {
 
 			// Track nodes based on IP allocations.
 			if val, ok := attr.AttrSecondary[ipam.AttributeNode]; ok {
-				kn := c.kubernetesNodeForCalico(val)
-				if kn == "" {
-					// If we can't determine a corresponding Kubernetes node for this allocation,
-					// we can't go any further. Move on to the next allocation.
-					logrus.WithField("calicoNode", val).Info("Could not find corresponding k8s node for allocation, skip")
-					continue
-				}
-				if _, ok := nodes[kn]; !ok {
-					nodes[kn] = []model.AllocationAttribute{}
+				if _, ok := calicoNodes[val]; !ok {
+					calicoNodes[val] = []model.AllocationAttribute{}
 				}
 
 				// If there is no handle, then skip this IP. We need the handle
@@ -101,6 +91,7 @@ func (c *NodeController) syncIPAMCleanup() error {
 					logc := log.WithFields(log.Fields{"ip": ip, "block": b.CIDR.String()})
 					if firstSkip {
 						logc.Warnf("Skipping IP with no handle")
+						firstSkip = false
 					} else {
 						logc.Debugf("Skipping IP with no handle")
 					}
@@ -109,24 +100,41 @@ func (c *NodeController) syncIPAMCleanup() error {
 
 				// Add this allocation to the node, so we can release it later if
 				// we need to.
-				nodes[kn] = append(nodes[kn], attr)
+				calicoNodes[val] = append(calicoNodes[val], attr)
 			}
 		}
 	}
-	log.Debugf("Kubernetes nodes found in IPAM: %v", nodes)
+	log.Debugf("Calico nodes found in IPAM: %v", calicoNodes)
 
 	// For storing any errors encountered below.
 	var storedErr error
 
 	// For each node present in IPAM, if it doesn't exist in the Kubernetes API then we
 	// should consider it a candidate for cleanup.
-	for node, allocations := range nodes {
-		// Check if it exists in the Kubernetes API.
-		logc := log.WithField("node", node)
-		if c.nodeExists(node) {
-			logc.Debug("Node still exists, continue")
+	for cnode, allocations := range calicoNodes {
+		// Lookup the corresponding Kubernetes node for each Calico node we found in IPAM.
+		// In KDD mode, these are 1:1. However, in etcd mode its possible that the Calico node has a
+		// different name from the Kubernetes node.
+		knode, err := c.kubernetesNodeForCalico(cnode)
+		if err != nil {
+			// Error checking for matching k8s node. Skip for now.
+			log.WithError(err).Warnf("Failed to lookup corresponding node, skipping %s", cnode)
 			continue
 		}
+		logc := log.WithFields(log.Fields{"calicoNode": cnode, "k8sNode": knode})
+
+		// If we found a corresponding k8s node name, check to make sure it is gone. If we
+		// found no corresponding node, then we're good to clean up any allocations.
+		// We'll check each allocation to make sure it comes from Kubernetes (or is a tunnel address)
+		// before cleaning it up below.
+		if knode != "" {
+			// Check if it exists in the Kubernetes API.
+			if c.nodeExists(knode) {
+				logc.Debug("Node still exists, continue")
+				continue
+			}
+		}
+		logc.Info("Checking node")
 
 		// Node exists in IPAM but not in the Kubernetes API. Go through each IP address and
 		// check to see if the pod it references exists. If all the pods on that node are gone,
@@ -150,7 +158,7 @@ func (c *NodeController) syncIPAMCleanup() error {
 
 			// Check to see if the pod still exists. If it does, then we shouldn't clean up
 			// this node, since it might come back online.
-			if pod != "" && c.podExists(pod, ns, node) {
+			if pod != "" && c.podExists(pod, ns, knode) {
 				logc.WithFields(log.Fields{"pod": pod, "ns": ns}).Debugf("Pod still exists")
 				canDelete = false
 				break
@@ -166,9 +174,9 @@ func (c *NodeController) syncIPAMCleanup() error {
 		// Potentially ratelimit node cleanup.
 		time.Sleep(c.rl.When(RateLimitCalicoDelete))
 		logc.Info("Cleaning up IPAM resources for deleted node")
-		if err := c.cleanupNode(node, allocations); err != nil {
+		if err := c.cleanupNode(cnode, allocations); err != nil {
 			// Store the error, but continue. Storing the error ensures we'll retry.
-			log.WithError(err).Warnf("Error cleaning up node '%s'", node)
+			logc.WithError(err).Warnf("Error cleaning up node")
 			storedErr = err
 			continue
 		}
@@ -182,10 +190,10 @@ func (c *NodeController) syncIPAMCleanup() error {
 	return nil
 }
 
-func (c *NodeController) cleanupNode(node string, allocations []model.AllocationAttribute) error {
+func (c *NodeController) cleanupNode(cnode string, allocations []model.AllocationAttribute) error {
 	// At this point, we've verified that the node isn't in Kubernetes and that all the allocations
 	// are tied to pods which don't exist any more. Clean up any allocations which may still be laying around.
-	logc := log.WithField("node", node)
+	logc := log.WithField("calicoNode", cnode)
 	retry := false
 	for _, a := range allocations {
 		if err := c.calicoClient.IPAM().ReleaseByHandle(c.ctx, *a.AttrPrimary); err != nil {
@@ -210,7 +218,7 @@ func (c *NodeController) cleanupNode(node string, allocations []model.Allocation
 	}
 
 	// Release the affinities for this node, requiring that the blocks are empty.
-	if err := c.calicoClient.IPAM().ReleaseHostAffinities(c.ctx, node, true); err != nil {
+	if err := c.calicoClient.IPAM().ReleaseHostAffinities(c.ctx, cnode, true); err != nil {
 		logc.WithError(err).Errorf("Failed to release block affinities for node")
 		return err
 	}
@@ -219,9 +227,9 @@ func (c *NodeController) cleanupNode(node string, allocations []model.Allocation
 	return nil
 }
 
-// nodeExists returns true if the given node exists in the Kubernetes API, and false otherwise.
-func (c *NodeController) nodeExists(node string) bool {
-	_, err := c.k8sClientset.CoreV1().Nodes().Get(node, v1.GetOptions{})
+// nodeExists returns true if the given node still exists in the Kubernetes API.
+func (c *NodeController) nodeExists(knode string) bool {
+	_, err := c.k8sClientset.CoreV1().Nodes().Get(knode, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return false
@@ -231,20 +239,20 @@ func (c *NodeController) nodeExists(node string) bool {
 	return true
 }
 
-// podExists returns if the given pod exists in the Kubernetes API and is on the provided Kubernetes node.
+// podExists returns whether the given pod exists in the Kubernetes API and is on the provided Kubernetes node.
 // Note that the "node" parameter is the name of the Kubernetes node in the Kubernetes API.
 func (c *NodeController) podExists(name, ns, node string) bool {
-	n, err := c.k8sClientset.CoreV1().Pods(ns).Get(name, v1.GetOptions{})
+	p, err := c.k8sClientset.CoreV1().Pods(ns).Get(name, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return false
 		}
 		log.WithError(err).Warn("Failed to query pod, assume it exists")
 	}
-	if n.Spec.NodeName != node {
+	if p.Spec.NodeName != node {
 		// If the pod has been rescheduled to a new node, we can treat the old allocation as
 		// gone and clean it up.
-		fields := log.Fields{"old": node, "new": n.Spec.NodeName, "pod": name, "ns": ns}
+		fields := log.Fields{"old": node, "new": p.Spec.NodeName, "pod": name, "ns": ns}
 		log.WithFields(fields).Info("Pod rescheduled on new node. Will clean up old allocation")
 		return false
 	}
@@ -253,13 +261,13 @@ func (c *NodeController) podExists(name, ns, node string) bool {
 
 // kubernetesNodeForCalico returns the name of the Kubernetes node that corresponds to this Calico node.
 // This function returns an empty string if no action should be taken for this node.
-func (c *NodeController) kubernetesNodeForCalico(cnode string) string {
+func (c *NodeController) kubernetesNodeForCalico(cnode string) (string, error) {
 	c.nodemapLock.Lock()
 	defer c.nodemapLock.Unlock()
 
 	for kn, cn := range c.nodemapper {
 		if cn == cnode {
-			return kn
+			return kn, nil
 		}
 	}
 
@@ -269,27 +277,16 @@ func (c *NodeController) kubernetesNodeForCalico(cnode string) string {
 	calicoNode, err := c.calicoClient.Nodes().Get(context.TODO(), cnode, options.GetOptions{})
 	if err != nil {
 		if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
-			// The Calico node referenced in the IPAM data doesn't actually exist!
-			// We should clean this allocation up - return the provided cnode name to the calling
-			// code to indicate this.
-			//
-			// NOTE: If there happens to be a k8s node with the exact name as the missing Calico node,
-			// we won't clean up this address until the k8s node is removed. This is maybe extra cautious,
-			// but probably OK since we don't expect to ever be in a state where the Calico node
-			// has been deleted but the k8s node is still present in the API.
-			logrus.WithError(err).Warn("Unable to find Calico Node referenced in IPAM data")
-			return cnode
+			logrus.WithError(err).Info("Calico Node referenced in IPAM data does not exist")
+			return "", nil
 		}
-
-		// Error querying the Calico node object.
-		// Return an empty string since we can't reasonably do anything in this case.
 		logrus.WithError(err).Warn("failed to query Calico Node referenced in IPAM data")
-		return ""
+		return "", err
 	}
 
 	// Try to pull the k8s name from the retrieved Calico node object. If there is no match,
 	// this will return an empty string, correctly telling the calling code to ignore this allocation.
-	return getK8sNodeName(*calicoNode)
+	return getK8sNodeName(*calicoNode), nil
 }
 
 func ordinalToIP(b *model.AllocationBlock, ord int) net.IP {

@@ -224,10 +224,7 @@ var _ = Describe("kube-controllers IPAM FV tests (etcd mode)", func() {
 		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
 	})
 
-	// This tests a strange scenario where there is no Calico node matching the IPAM allocation data, but there IS a
-	// Kubernetes node that happens to have the same name. We don't make assumptions about similar names between Calico
-	// and Kubernetes node objects (the orchRefs tell all), but to be safe we leave the allocation in place.
-	It("should not garbage collect IP addresses if there is no Calico node, if there happens to be a Kubernetes node", func() {
+	It("should garbage collect IP addresses if there is no Calico node, even if there happens to be a Kubernetes node", func() {
 		// Run controller.
 		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), false)
 
@@ -251,15 +248,6 @@ var _ = Describe("kube-controllers IPAM FV tests (etcd mode)", func() {
 		_, err = k8sClient.CoreV1().Nodes().Create(kn2)
 		Expect(err).NotTo(HaveOccurred())
 		err = k8sClient.CoreV1().Nodes().Delete(kn2.Name, nil)
-		Expect(err).NotTo(HaveOccurred())
-
-		// The IPAM allocation should be intact.
-		Consistently(func() error {
-			return assertIPsWithHandle(c.IPAM(), handleA, 1)
-		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
-
-		// Delete the similarly named k8s node.
-		err = k8sClient.CoreV1().Nodes().Delete(kn.Name, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Now the allocation should be cleaned up.
