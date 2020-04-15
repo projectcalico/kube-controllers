@@ -157,7 +157,7 @@ var _ = Describe("kube-controllers IPAM FV tests (etcd mode)", func() {
 		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
 	})
 
-	It("should not garbage collect IP addresses if the corresponding node is not a Kubernetes node", func() {
+	It("should never garbage collect IP addresses that do not belong to Kubernetes pods", func() {
 		// Run controller.
 		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), false)
 
@@ -175,9 +175,10 @@ var _ = Describe("kube-controllers IPAM FV tests (etcd mode)", func() {
 		_, err = c.Nodes().Create(context.Background(), cn, options.SetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
-		// Allocate an IP address on the Calico node.
+		// Allocate an IP address on the Calico node. Since this is mimicking an allocation on a non-k8s node,
+		// don't include pod / namespace metadata.
 		handleA := "handleA"
-		attrs := map[string]string{"node": commonNodeName, "pod": "pod-a", "namespace": "default"}
+		attrs := map[string]string{"node": commonNodeName}
 		err = c.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
 			IP: net.MustParseIP("192.168.0.1"), HandleID: &handleA, Attrs: attrs, Hostname: commonNodeName,
 		})
@@ -200,8 +201,7 @@ var _ = Describe("kube-controllers IPAM FV tests (etcd mode)", func() {
 		err = k8sClient.CoreV1().Nodes().Delete(kn.Name, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		// The IPAM allocation should still be untouched, since the Calico node object
-		// doesn't have a linkage to the Kubernetes one.
+		// The IPAM allocation should still be untouched.
 		Consistently(func() error {
 			return assertIPsWithHandle(c.IPAM(), handleA, 1)
 		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
@@ -218,9 +218,9 @@ var _ = Describe("kube-controllers IPAM FV tests (etcd mode)", func() {
 		err = k8sClient.CoreV1().Nodes().Delete(kn2.Name, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		// Now the IP should have been cleaned up since the Calico node which owns the IP is gone.
-		Eventually(func() error {
-			return assertIPsWithHandle(c.IPAM(), handleA, 0)
+		// The IPAM allocation should still be untouched.
+		Consistently(func() error {
+			return assertIPsWithHandle(c.IPAM(), handleA, 1)
 		}, 5*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
 	})
 

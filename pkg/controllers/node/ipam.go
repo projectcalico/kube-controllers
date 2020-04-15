@@ -113,7 +113,7 @@ func (c *NodeController) syncIPAMCleanup() error {
 	// should consider it a candidate for cleanup.
 	for cnode, allocations := range calicoNodes {
 		// Lookup the corresponding Kubernetes node for each Calico node we found in IPAM.
-		// In KDD mode, these are 1:1. However, in etcd mode its possible that the Calico node has a
+		// In KDD mode, these are identical. However, in etcd mode its possible that the Calico node has a
 		// different name from the Kubernetes node.
 		knode, err := c.kubernetesNodeForCalico(cnode)
 		if err != nil {
@@ -153,12 +153,13 @@ func (c *NodeController) syncIPAMCleanup() error {
 			// the block to be cleaned up.
 			if (ns == "" || pod == "") && !ipip && !vxlan {
 				logc.Info("IP allocation on node is from an unknown source. Will be unable to cleanup block until it is removed.")
+				canDelete = false
 				continue
 			}
 
 			// Check to see if the pod still exists. If it does, then we shouldn't clean up
 			// this node, since it might come back online.
-			if pod != "" && c.podExists(pod, ns, knode) {
+			if knode != "" && pod != "" && c.podExistsOnNode(pod, ns, knode) {
 				logc.WithFields(log.Fields{"pod": pod, "ns": ns}).Debugf("Pod still exists")
 				canDelete = false
 				break
@@ -167,8 +168,8 @@ func (c *NodeController) syncIPAMCleanup() error {
 
 		if !canDelete {
 			// Return an error here, it will trigger a reschedule of this call.
-			logc.Infof("Can't cleanup node yet - pods still exist")
-			return fmt.Errorf("Cannot clean up node yet, pods still exist")
+			logc.Infof("Can't cleanup node yet - IPs still in use")
+			return fmt.Errorf("Cannot clean up node yet, IPs still in use")
 		}
 
 		// Potentially ratelimit node cleanup.
@@ -239,9 +240,9 @@ func (c *NodeController) nodeExists(knode string) bool {
 	return true
 }
 
-// podExists returns whether the given pod exists in the Kubernetes API and is on the provided Kubernetes node.
+// podExistsOnNode returns whether the given pod exists in the Kubernetes API and is on the provided Kubernetes node.
 // Note that the "node" parameter is the name of the Kubernetes node in the Kubernetes API.
-func (c *NodeController) podExists(name, ns, node string) bool {
+func (c *NodeController) podExistsOnNode(name, ns, node string) bool {
 	p, err := c.k8sClientset.CoreV1().Pods(ns).Get(name, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
