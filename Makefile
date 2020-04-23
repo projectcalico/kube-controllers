@@ -19,7 +19,7 @@ Makefile.common.$(MAKE_BRANCH):
 # Build mounts for running in "local build" mode. This allows an easy build using local development code,
 # assuming that there is a local checkout of libcalico in the same directory as this repo.
 ifdef LOCAL_BUILD
-PHONY: set-up-local-build
+.PHONY: set-up-local-build
 LOCAL_BUILD_DEP:=set-up-local-build
 
 EXTRA_DOCKER_ARGS+=-v $(CURDIR)/../libcalico-go:/go/src/github.com/projectcalico/libcalico-go:rw \
@@ -76,12 +76,12 @@ sub-build-%:
 bin/kube-controllers-linux-$(ARCH): $(LOCAL_BUILD_DEP) $(SRC_FILES)
 	$(DOCKER_RUN) \
 	  -v $(CURDIR)/bin:/go/src/$(PACKAGE_NAME)/bin \
-	  $(CALICO_BUILD) go build -v -o bin/kube-controllers-$(BUILDOS)-$(ARCH) -ldflags "-X main.VERSION=$(GIT_VERSION)" ./cmd/kube-controllers/
+	  $(CALICO_BUILD) go build -v -o $@ -ldflags "-X main.VERSION=$(GIT_VERSION)" ./cmd/kube-controllers/
 
 bin/check-status-linux-$(ARCH): $(LOCAL_BUILD_DEP) $(SRC_FILES)
 	$(DOCKER_RUN) \
 	  -v $(CURDIR)/bin:/go/src/$(PACKAGE_NAME)/bin \
-	  $(CALICO_BUILD) go build -v -o bin/check-status-$(BUILDOS)-$(ARCH) -ldflags "-X main.VERSION=$(GIT_VERSION)" ./cmd/check-status/
+	  $(CALICO_BUILD) go build -v -o $@ -ldflags "-X main.VERSION=$(GIT_VERSION)" ./cmd/check-status/
 
 bin/kubectl-$(ARCH):
 	wget https://storage.googleapis.com/kubernetes-release/release/$(KUBECTL_VERSION)/bin/linux/$(ARCH)/kubectl -O $@
@@ -234,12 +234,28 @@ tests/fv/fv.test: $(LOCAL_BUILD_DEP) $(shell find ./tests -type f -name '*.go' -
 .PHONY: ci
 ci: clean mod-download image-all static-checks ut fv
 
+## Avoid unplanned go.sum updates
+.PHONY: undo-go-sum check-dirty
+undo-go-sum:
+	@if (git status --porcelain go.sum | grep -o 'go.sum'); then \
+	  @echo "Undoing go.sum update..."; \
+	  git checkout -- go.sum; \
+	fi
+
+## Check if generated image is dirty
+check-dirty: undo-go-sum
+	@if (git describe --tags --dirty | grep -c dirty >/dev/null); then \
+	  echo "Generated image is dirty:"; \
+	  git status --porcelain; \
+	  false; \
+	fi
+
 ###############################################################################
 # CD
 ###############################################################################
 .PHONY: cd
 ## Deploys images to registry
-cd:
+cd: check-dirty
 ifndef CONFIRM
 	$(error CONFIRM is undefined - run using make <target> CONFIRM=true)
 endif
