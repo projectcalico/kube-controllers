@@ -111,12 +111,8 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	// also syncs up labels between k8s/calico node objects
 	nc.indexer, nc.informer = cache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, handlers, cache.Indexers{})
 
-	// Start the syncer. We always need to run this to manage auto
-	// hostendpoints: if autoHostEndpoints was enabled then disabled later on
-	// then we need to remove the leftover auto heps.
+	// Init the syncer but don't start it.
 	nc.initSyncer()
-	nc.syncer.Start()
-
 	return nc
 }
 
@@ -144,6 +140,14 @@ func (c *NodeController) Run(stopCh chan struct{}) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	log.Debug("Finished syncing with Kubernetes API (Nodes)")
+
+	// Start the syncer after the informer has synced. The syncer's OnUpdates
+	// handler assumes that the indexer is populated by the informer.
+	//
+	// We always need to run this to manage auto
+	// hostendpoints: if autoHostEndpoints was enabled then disabled later on
+	// then we need to remove the leftover auto heps.
+	c.syncer.Start()
 
 	// Start Calico cache.
 	go c.acceptScheduleRequests(stopCh)
