@@ -75,15 +75,15 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 					// it exists perform a sync.
 					obj, ok, err := c.indexer.GetByKey(kn)
 
-					// Just log, we want to execution for this event to
-					// fallthrough to the auto host endpoints processing.
+					// Sync labels if there is a corresponding kubernetes node.
+					// If we can't get a kubernetes node, just log.
+					// We want execution for this event to continue onto the
+					// auto host endpoints processing logic.
 					if !ok {
-						logrus.Info("No corresponding kubernetes node")
+						logrus.Debugf("No corresponding kubernetes node")
 					} else if err != nil {
 						logrus.WithError(err).Warnf("Couldn't get node from indexer")
-					}
-
-					if ok && err == nil {
+					} else {
 						c.syncNodeLabels(obj.(*v1.Node))
 					}
 				}
