@@ -185,7 +185,8 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		nodeController = testutils.RunNodeController(apiconfig.EtcdV3, etcd.IP, kconfigFile.Name(), true)
 
 		labels := map[string]string{"calico-label": "calico-value", "calico-label2": "value2"}
-		// Create a Calico node with a reference to an non-existen k8s node.
+
+		// Create a Calico node with a reference to an non-existent k8s node.
 		cn := calicoNode(c, cNodeName, kNodeName, labels)
 		_, err := c.Nodes().Create(context.Background(), cn, options.SetOptions{})
 		Expect(err).NotTo(HaveOccurred())
