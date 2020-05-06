@@ -3,19 +3,40 @@ module github.com/projectcalico/kube-controllers
 go 1.13
 
 require (
+	github.com/Workiva/go-datastructures v1.0.50 // indirect
 	github.com/apparentlymart/go-cidr v1.0.1
+	github.com/containernetworking/plugins v0.8.2 // indirect
 	github.com/coreos/etcd v3.3.18+incompatible
+	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815 // indirect
+	github.com/go-ini/ini v1.44.0 // indirect
+	github.com/golang-collections/collections v0.0.0-20130729185459-604e922904d3 // indirect
+	github.com/google/gopacket v1.1.17 // indirect
+	github.com/google/netstack v0.0.0-20191123085552-55fcc16cd0eb // indirect
+	github.com/hashicorp/go-version v1.2.0 // indirect
+	github.com/ishidawataru/sctp v0.0.0-20191218070446-00ab2ac2db07 // indirect
 	github.com/joho/godotenv v1.3.0
+	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0 // indirect
 	github.com/kelseyhightower/envconfig v0.0.0-20180517194557-dd1402a4d99d
+	github.com/libp2p/go-reuseport v0.0.1 // indirect
+	github.com/mailru/easyjson v0.0.0-20190626092158-b2ccc519800e // indirect
+	github.com/mipearson/rfw v0.0.0-20170619235010-6f0a6f3266ba // indirect
 	github.com/onsi/ginkgo v1.10.1
 	github.com/onsi/gomega v1.7.0
 	github.com/patrickmn/go-cache v0.0.0-20180815053127-5633e0862627
-	github.com/projectcalico/felix v0.0.0-20200428221733-4a6b7c494172
-	github.com/projectcalico/libcalico-go v1.7.2-0.20200427180741-f197f7370140
+	github.com/philhofer/fwd v1.0.0 // indirect
+	github.com/pquerna/ffjson v0.0.0-20190813045741-dac163c6c0a9 // indirect
+	github.com/projectcalico/libcalico-go v0.0.0-20200506032348-dda4a7964ffa
+	github.com/projectcalico/pod2daemon v0.0.0-20191223184832-a0e1c4693271 // indirect
+	github.com/projectcalico/typha v0.7.2 // indirect
 	github.com/prometheus/client_golang v0.9.4 // indirect
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.4.2
+	github.com/smartystreets/goconvey v0.0.0-20190731233626-505e41936337 // indirect
 	github.com/spf13/pflag v1.0.5
+	github.com/tinylib/msgp v1.1.0 // indirect
+	github.com/ugorji/go v0.0.0-20171019201919-bdcc60b419d1 // indirect
+	gopkg.in/go-playground/validator.v9 v9.28.0 // indirect
+	gopkg.in/ini.v1 v1.46.0 // indirect
 
 	// k8s.io/api v1.16.3 is at 16d7abae0d2a
 	k8s.io/api v0.0.0
@@ -29,6 +50,7 @@ require (
 	// k8s.io/client-go 1.16.3 is at 6c5935290e33
 	k8s.io/client-go v12.0.0+incompatible
 	k8s.io/klog v1.0.0
+	k8s.io/kubernetes v1.16.2 // indirect
 )
 
 replace (
