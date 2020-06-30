@@ -351,6 +351,140 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 			Expect(len(kvps.KVPairs)).To(Equal(0))
 		})
 	})
+
+	Context("Race condition tests", func() {
+		BeforeEach(func() {
+			p := api.NewIPPool()
+			p.Name = "test-ippool"
+			p.Spec.CIDR = "192.168.0.0/16"
+			p.Spec.BlockSize = 26
+			p.Spec.NodeSelector = "all()"
+			p.Spec.Disabled = false
+			_, err := calicoClient.IPPools().Create(context.Background(), p, options.SetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			// Delete the IP pool.
+			_, err := calicoClient.IPPools().Delete(context.Background(), "test-ippool", options.DeleteOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should handle node recreation", func() {
+			// This test reproduces issue XXX
+			node5 := "node-5"
+			numAddressesToAssign := 150
+			numNodes := 10
+
+			By("initializing necessary state", func() {
+				// Create the node(s) in the Kubernetes API. For this test, we want several nodes in order to stress
+				// the IPAM controller code.
+				for nodeNum := 0; nodeNum < numNodes; nodeNum++ {
+					nodeName := fmt.Sprintf("node-%d", nodeNum)
+					_, err := k8sClient.CoreV1().Nodes().Create(&v1.Node{
+						TypeMeta:   metav1.TypeMeta{Kind: "Node", APIVersion: "v1"},
+						ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+						Spec:       v1.NodeSpec{},
+					})
+					Expect(err).NotTo(HaveOccurred())
+
+					// Allocate an IPIP address to the node (thus also claiming a block)
+					attrs := map[string]string{"node": nodeName, "type": "ipipTunnelAddress"}
+					handle := fmt.Sprintf("node%dIPIP", nodeNum)
+					_, _, err = calicoClient.IPAM().AutoAssign(context.Background(), ipam.AutoAssignArgs{
+						Num4: 1, HandleID: &handle, Attrs: attrs, Hostname: nodeName,
+					})
+					Expect(err).NotTo(HaveOccurred())
+
+					// Allocate many pod IP addresses to the node - we want several blocks worth in order to stress the
+					// garbage collection code.
+					for podNum := 0; podNum < numAddressesToAssign; podNum++ {
+						handle := fmt.Sprintf("node%d-pod%d", nodeNum, podNum)
+						attrs = map[string]string{"node": nodeName, "pod": fmt.Sprintf("node%d-pod%d", nodeNum, podNum), "namespace": "default"}
+						v4, v6, err := calicoClient.IPAM().AutoAssign(context.Background(), ipam.AutoAssignArgs{
+							Num4: 1, HandleID: &handle, Attrs: attrs, Hostname: nodeName,
+						})
+						Expect(err).NotTo(HaveOccurred())
+						Expect(len(v4)).To(Equal(1))
+						Expect(len(v6)).To(Equal(0))
+					}
+				}
+
+				// Expect the correct blocks to exist as a result of the IPAM allocations above.
+				blocks, err := bc.List(context.Background(), model.BlockListOptions{}, "")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(len(blocks.KVPairs)).To(Equal(numNodes * 3))
+
+				// Should be 3 affinities for any particular node.
+				affs, err := bc.List(context.Background(), model.BlockAffinityListOptions{Host: node5}, "")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(len(affs.KVPairs)).To(Equal(3))
+
+			})
+
+			// Trigger the race condition. Delete the node, but quickly re-create it and assign a new IPIP / VXLAN
+			// tunnel address. This results in the garbage collection code being called, but while the GC code is executing
+			// the resources it is cleaning up will be re-created.
+
+			// Delete a node to trigger the IPAM cleanup code.
+			By("Deleting the node to trigger IPAM cleanup")
+			err := k8sClient.CoreV1().Nodes().Delete(node5, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Clean up arbitrary IP addresses that were assigned earlier. This simulates the CNI plugin releasing these
+			// addresses out-of-band of the controller, and will cause kube-controllers to do additional retries, further
+			// stressing the GC code.
+			for i := 0; i < numNodes; i++ {
+				for j := 0; j < numAddressesToAssign; j++ {
+					// Release every third address on every node.
+					if i%3 == 0 {
+						err = calicoClient.IPAM().ReleaseByHandle(context.Background(), fmt.Sprintf("node%d-pod%d", i, j))
+						Expect(err).NotTo(HaveOccurred())
+					}
+				}
+			}
+
+			// Create the node again.
+			By("Recreating the node shortly after")
+			_, err = k8sClient.CoreV1().Nodes().Create(&v1.Node{
+				TypeMeta:   metav1.TypeMeta{Kind: "Node", APIVersion: "v1"},
+				ObjectMeta: metav1.ObjectMeta{Name: node5},
+				Spec:       v1.NodeSpec{},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Allocate IPIP address to the recreated node. This simulates calico/node allocating a new address when it starts up
+			// on the re-created node.
+			By("Allocating a new IPIP address to the node")
+			attrs := map[string]string{"node": node5, "type": "ipipTunnelAddress"}
+			handle := "node5IPIP"
+			v4, _, err := calicoClient.IPAM().AutoAssign(context.Background(), ipam.AutoAssignArgs{
+				Num4: 1, HandleID: &handle, Attrs: attrs, Hostname: node5,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(v4)).To(Equal(1))
+
+			// Wait for all the node5 pod IP addresses to be cleaned up (due to deletion above).
+			// This might take a while since kube-controllers is ratelimited, which is part of the
+			// issue this test is trying to reproduce.
+			By("Waiting for IP addresses on the deleted node to be cleaned up")
+			Eventually(func() error {
+				// Check each allocation.
+				for i := 0; i < numAddressesToAssign; i++ {
+					if err := assertIPsWithHandle(calicoClient.IPAM(), fmt.Sprintf("node5-pod%d", i), 0); err != nil {
+						return err
+					}
+				}
+				return nil
+			}, 15*time.Minute, 10*time.Second).Should(BeNil())
+
+			// Assert that Node5's IPIP tunnel address is still allocated. If it's not, it means the
+			// IPAM GC controller didn't spot that a new address was allocated.
+			err = assertIPsWithHandle(calicoClient.IPAM(), "node5IPIP", 1)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+	})
 })
 
 func assertNumBlocks(bc backend.Client, num int) error {

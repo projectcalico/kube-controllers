@@ -800,7 +800,7 @@ var _ = Describe("kube-controllers FV tests", func() {
 				Spec: v1.PodSpec{
 					NodeName: nodeName,
 					Containers: []v1.Container{
-						v1.Container{
+						{
 							Name:    "container1",
 							Image:   "busybox",
 							Command: []string{"sleep", "3600"},
@@ -947,7 +947,7 @@ var _ = Describe("kube-controllers FV tests", func() {
 			Spec: v1.PodSpec{
 				NodeName: "127.0.0.1",
 				Containers: []v1.Container{
-					v1.Container{
+					{
 						Name:    "container1",
 						Image:   "busybox",
 						Command: []string{"sleep", "3600"},
