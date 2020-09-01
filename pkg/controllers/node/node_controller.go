@@ -19,11 +19,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
@@ -32,6 +37,7 @@ import (
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
+	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 )
 
 const (
@@ -164,6 +170,9 @@ func (c *NodeController) acceptScheduleRequests(stopCh <-chan struct{}) {
 	for {
 		// Wait until something wakes us up, or we are stopped
 		select {
+		case <-time.After(10 * time.Second):
+			// CASEY: HACK: CHECK FOR LEAKED IPAM HANDLES
+			c.syncIPAMHandles()
 		case <-c.schedule:
 			err := c.syncDelete()
 			if err != nil {
@@ -176,6 +185,48 @@ func (c *NodeController) acceptScheduleRequests(stopCh <-chan struct{}) {
 			return
 		}
 	}
+}
+
+func (c *NodeController) syncIPAMHandles() error {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return err
+	}
+	cli, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+	handles := cli.Resource(schema.GroupVersionResource{
+		Group:    "crd.projectcalico.org",
+		Version:  "v1",
+		Resource: "ipamhandles",
+	})
+
+	logrus.Info("Starting ipam GC")
+	ul, err := handles.List(metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	logrus.Infof("Listed %d handles in total", len(ul.Items))
+	for _, u := range ul.Items {
+		if u.GetDeletionTimestamp() == nil {
+			continue
+		}
+
+		// If the handle has a deletion timestamp set, then we need to
+		// release the IP addresses associated with it and then delete the handle.
+		handleID := u.Object["spec"].(map[string]interface{})["handleID"].(string)
+		if err := c.calicoClient.IPAM().ReleaseByHandle(c.ctx, handleID); err != nil {
+			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
+				continue
+			}
+			logrus.WithError(err).Error("Failed to release IP")
+			return err
+		}
+
+	}
+	logrus.Info("Finished ipam GC")
+	return nil
 }
 
 func (c *NodeController) syncDelete() error {
