@@ -82,6 +82,7 @@ type ControllersConfig struct {
 	WorkloadEndpoint *GenericControllerConfig
 	ServiceAccount   *GenericControllerConfig
 	Namespace        *GenericControllerConfig
+	RouteReflector   *GenericControllerConfig
 }
 
 type GenericControllerConfig struct {
@@ -498,6 +499,7 @@ func mergeEnabledControllers(envVars map[string]string, status *v3.KubeControlle
 	w := ac.WorkloadEndpoint
 	s := ac.ServiceAccount
 	ns := ac.Namespace
+	rr := ac.RouteReflector
 
 	v, p := envVars[EnvEnabledControllers]
 	if p {
@@ -519,6 +521,9 @@ func mergeEnabledControllers(envVars map[string]string, status *v3.KubeControlle
 			case "serviceaccount":
 				rc.ServiceAccount = &GenericControllerConfig{}
 				sc.ServiceAccount = &v3.ServiceAccountControllerConfig{}
+			case "routereflector":
+				rc.RouteReflector = &GenericControllerConfig{}
+				sc.RouteReflector = &v3.RouteReflectorControllerConfig{}
 			case "flannelmigration":
 				log.WithField(EnvEnabledControllers, v).Fatal("cannot run flannelmigration with other controllers")
 			default:
@@ -591,6 +596,14 @@ func mergeEnabledControllers(envVars map[string]string, status *v3.KubeControlle
 			rc.ServiceAccount.ReconcilerPeriod = s.ReconcilerPeriod.Duration
 		}
 		sc.ServiceAccount.ReconcilerPeriod = s.ReconcilerPeriod
+	}
+	if rc.RouteReflector != nil && rr != nil {
+		if rr.ReconcilerPeriod == nil {
+			rc.RouteReflector.ReconcilerPeriod = time.Minute * 5
+		} else {
+			rc.RouteReflector.ReconcilerPeriod = rr.ReconcilerPeriod.Duration
+		}
+		sc.RouteReflector.ReconcilerPeriod = rr.ReconcilerPeriod
 	}
 }
 
