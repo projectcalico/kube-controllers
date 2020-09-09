@@ -224,7 +224,7 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Allocate an IPIP and VXLAN address to NodeA as well.
+			// Allocate an IPIP, VXLAN and WG address to NodeA as well.
 			handleAIPIP := "handleAIPIP"
 			attrs = map[string]string{"node": nodeA, "type": "ipipTunnelAddress"}
 			err = calicoClient.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
@@ -236,6 +236,13 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 			attrs = map[string]string{"node": nodeA, "type": "vxlanTunnelAddress"}
 			err = calicoClient.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
 				IP: net.MustParseIP("192.168.0.3"), HandleID: &handleAVXLAN, Attrs: attrs, Hostname: nodeA,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			handleAWG := "handleAWireguard"
+			attrs = map[string]string{"node": nodeA, "type": "wireguardTunnelAddress"}
+			err = calicoClient.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
+				IP: net.MustParseIP("192.168.0.4"), HandleID: &handleAWG, Attrs: attrs, Hostname: nodeA,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
