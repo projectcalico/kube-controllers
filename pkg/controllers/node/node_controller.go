@@ -172,7 +172,10 @@ func (c *NodeController) acceptScheduleRequests(stopCh <-chan struct{}) {
 		select {
 		case <-time.After(10 * time.Second):
 			// CASEY: HACK: CHECK FOR LEAKED IPAM HANDLES
-			c.syncIPAMHandles()
+			err := c.syncIPAMHandles()
+			if err != nil {
+				log.WithError(err).Error("ERROR")
+			}
 		case <-c.schedule:
 			err := c.syncDelete()
 			if err != nil {
@@ -221,6 +224,12 @@ func (c *NodeController) syncIPAMHandles() error {
 				continue
 			}
 			logrus.WithError(err).Error("Failed to release IP")
+			return err
+		}
+
+		u.SetFinalizers(nil)
+		_, err = handles.Update(&u, metav1.UpdateOptions{})
+		if err != nil {
 			return err
 		}
 
