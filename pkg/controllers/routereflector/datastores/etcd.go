@@ -21,18 +21,18 @@ import (
 	"github.com/projectcalico/kube-controllers/pkg/controllers/routereflector/topologies"
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	calicoApi "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	calicoClient "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	log "github.com/sirupsen/logrus"
 )
 
-type nodeClient interface {
-	Nodes() calicoClient.NodeInterface
+type calicoNodeClient interface {
+	Update(context.Context, *apiv3.Node, options.SetOptions) (*apiv3.Node, error)
+	List(context.Context, options.ListOptions) (*apiv3.NodeList, error)
 }
 
 type EtcdDataStore struct {
 	topology     topologies.Topology
-	calicoClient nodeClient
+	calicoClient calicoNodeClient
 }
 
 func (d *EtcdDataStore) RemoveRRStatus(node *apiv3.Node) error {
@@ -51,7 +51,7 @@ func (d *EtcdDataStore) AddRRStatus(node *apiv3.Node) error {
 
 func (d *EtcdDataStore) updateRouteReflectorClusterID(node *apiv3.Node, clusterID string) error {
 	log.Debugf("Fetching Calico node object of %s", node.GetName())
-	calicoNodes, err := d.calicoClient.Nodes().List(context.Background(), options.ListOptions{})
+	calicoNodes, err := d.calicoClient.List(context.Background(), options.ListOptions{})
 	if err != nil {
 		log.Errorf("Unable to fetch Calico nodes %s because of %s", node.GetName(), err.Error())
 		return err
@@ -74,7 +74,7 @@ func (d *EtcdDataStore) updateRouteReflectorClusterID(node *apiv3.Node, clusterI
 	calicoNode.Spec.BGP.RouteReflectorClusterID = clusterID
 
 	log.Infof("Adding route reflector cluster ID in %s to '%s' for %s", calicoNode.GetName(), clusterID, node.GetName())
-	_, err = d.calicoClient.Nodes().Update(context.Background(), calicoNode, options.SetOptions{})
+	_, err = d.calicoClient.Update(context.Background(), calicoNode, options.SetOptions{})
 	if err != nil {
 		log.Errorf("Unable to update Calico node %s because of %s", node.GetName(), err.Error())
 		return err
@@ -83,7 +83,7 @@ func (d *EtcdDataStore) updateRouteReflectorClusterID(node *apiv3.Node, clusterI
 	return nil
 }
 
-func NewEtcdDatastore(topology *topologies.Topology, calicoClient calicoClient.Interface) Datastore {
+func NewEtcdDatastore(topology *topologies.Topology, calicoClient calicoNodeClient) Datastore {
 	return &EtcdDataStore{
 		topology:     *topology,
 		calicoClient: calicoClient,

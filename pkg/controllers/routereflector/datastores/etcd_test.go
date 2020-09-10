@@ -37,10 +37,8 @@ func TestEtcdRemoveRRStatusListError(t *testing.T) {
 			},
 		},
 		calicoClient: mockCalicoClient{
-			mockNodeInterface: mockNodeInterface{
-				list: func() (*calicoApi.NodeList, error) {
-					return nil, errors.New("fatal error")
-				},
+			list: func() (*calicoApi.NodeList, error) {
+				return nil, errors.New("fatal error")
 			},
 		},
 	}
@@ -66,12 +64,10 @@ func TestEtcdRemoveRRStatusNodeNotFound(t *testing.T) {
 			},
 		},
 		calicoClient: mockCalicoClient{
-			mockNodeInterface: mockNodeInterface{
-				list: func() (*calicoApi.NodeList, error) {
-					return &calicoApi.NodeList{
-						Items: []calicoApi.Node{},
-					}, nil
-				},
+			list: func() (*calicoApi.NodeList, error) {
+				return &calicoApi.NodeList{
+					Items: []calicoApi.Node{},
+				}, nil
 			},
 		},
 	}
@@ -100,27 +96,25 @@ func TestEtcdRemoveRRStatusUpdateError(t *testing.T) {
 			},
 		},
 		calicoClient: mockCalicoClient{
-			mockNodeInterface: mockNodeInterface{
-				list: func() (*calicoApi.NodeList, error) {
-					return &calicoApi.NodeList{
-						Items: []calicoApi.Node{
-							{
-								ObjectMeta: metav1.ObjectMeta{
-									Labels: map[string]string{
-										"rr":                     "0",
-										"kubernetes.io/hostname": "node",
-									},
-								},
-								Spec: calicoApi.NodeSpec{
-									BGP: &calicoApi.NodeBGPSpec{},
+			list: func() (*calicoApi.NodeList, error) {
+				return &calicoApi.NodeList{
+					Items: []calicoApi.Node{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Labels: map[string]string{
+									"rr":                     "0",
+									"kubernetes.io/hostname": "node",
 								},
 							},
+							Spec: calicoApi.NodeSpec{
+								BGP: &calicoApi.NodeBGPSpec{},
+							},
 						},
-					}, nil
-				},
-				update: func(*calicoApi.Node) (*calicoApi.Node, error) {
-					return nil, errors.New("fatal error")
-				},
+					},
+				}, nil
+			},
+			update: func(*calicoApi.Node) (*calicoApi.Node, error) {
+				return nil, errors.New("fatal error")
 			},
 		},
 	}
@@ -153,28 +147,26 @@ func TestEtcdRemoveRRStatus(t *testing.T) {
 			},
 		},
 		calicoClient: mockCalicoClient{
-			mockNodeInterface: mockNodeInterface{
-				list: func() (*calicoApi.NodeList, error) {
-					return &calicoApi.NodeList{
-						Items: []calicoApi.Node{
-							{
-								ObjectMeta: metav1.ObjectMeta{
-									Labels: map[string]string{
-										"rr":                     "0",
-										"kubernetes.io/hostname": "node",
-									},
-								},
-								Spec: calicoApi.NodeSpec{
-									BGP: &calicoApi.NodeBGPSpec{},
+			list: func() (*calicoApi.NodeList, error) {
+				return &calicoApi.NodeList{
+					Items: []calicoApi.Node{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Labels: map[string]string{
+									"rr":                     "0",
+									"kubernetes.io/hostname": "node",
 								},
 							},
+							Spec: calicoApi.NodeSpec{
+								BGP: &calicoApi.NodeBGPSpec{},
+							},
 						},
-					}, nil
-				},
-				update: func(node *calicoApi.Node) (*calicoApi.Node, error) {
-					nodeToUpdate = node
-					return node, nil
-				},
+					},
+				}, nil
+			},
+			update: func(node *calicoApi.Node) (*calicoApi.Node, error) {
+				nodeToUpdate = node
+				return node, nil
 			},
 		},
 	}
@@ -212,27 +204,25 @@ func TestEtcdAddRRStatus(t *testing.T) {
 			},
 		},
 		calicoClient: mockCalicoClient{
-			mockNodeInterface: mockNodeInterface{
-				list: func() (*calicoApi.NodeList, error) {
-					return &calicoApi.NodeList{
-						Items: []calicoApi.Node{
-							{
-								ObjectMeta: metav1.ObjectMeta{
-									Labels: map[string]string{
-										"kubernetes.io/hostname": "node",
-									},
-								},
-								Spec: calicoApi.NodeSpec{
-									BGP: &calicoApi.NodeBGPSpec{},
+			list: func() (*calicoApi.NodeList, error) {
+				return &calicoApi.NodeList{
+					Items: []calicoApi.Node{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Labels: map[string]string{
+									"kubernetes.io/hostname": "node",
 								},
 							},
+							Spec: calicoApi.NodeSpec{
+								BGP: &calicoApi.NodeBGPSpec{},
+							},
 						},
-					}, nil
-				},
-				update: func(node *calicoApi.Node) (*calicoApi.Node, error) {
-					nodeToUpdate = node
-					return node, nil
-				},
+					},
+				}, nil
+			},
+			update: func(node *calicoApi.Node) (*calicoApi.Node, error) {
+				nodeToUpdate = node
+				return node, nil
 			},
 		},
 	}

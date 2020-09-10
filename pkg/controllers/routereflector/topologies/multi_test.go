@@ -21,8 +21,8 @@ import (
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	calicoApi "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestIsRouteReflector(t *testing.T) {
@@ -283,6 +283,13 @@ func TestGetRouteReflectorStatuses(t *testing.T) {
 			},
 		}
 
+		readyNode := 0
+		for _, isReady := range d.nodes {
+			if isReady {
+				readyNode++
+			}
+		}
+
 		statuses := topology.GetRouteReflectorStatuses(d.nodes)
 
 		if len(statuses) != d.statuses {
@@ -304,7 +311,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 	now := time.Now()
 
 	data := []struct {
-		routeReflectors []corev1.Node
+		routeReflectors map[types.UID]*apiv3.Node
 		nodes           map[*apiv3.Node]bool
 		existingPeers   *calicoApi.BGPPeerList
 		toRefresh       []calicoApi.BGPPeer
@@ -312,7 +319,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 	}{
 		// Empty list, only rrs-to-rrs must be generate
 		{
-			[]corev1.Node{},
+			map[types.UID]*apiv3.Node{},
 			map[*apiv3.Node]bool{},
 			&calicoApi.BGPPeerList{},
 			[]calicoApi.BGPPeer{
@@ -334,7 +341,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 		},
 		// Empty list but rrs-to-rrs exists
 		{
-			[]corev1.Node{},
+			map[types.UID]*apiv3.Node{},
 			map[*apiv3.Node]bool{},
 			&calicoApi.BGPPeerList{
 				Items: []calicoApi.BGPPeer{
@@ -358,7 +365,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 		},
 		// Empty list but rrs-to-rrs different
 		{
-			[]corev1.Node{},
+			map[types.UID]*apiv3.Node{},
 			map[*apiv3.Node]bool{},
 			&calicoApi.BGPPeerList{
 				Items: []calicoApi.BGPPeer{
@@ -396,8 +403,8 @@ func TestGenerateBGPPeers(t *testing.T) {
 		},
 		// Empty list but has existing to delete
 		{
-			[]corev1.Node{
-				{},
+			map[types.UID]*apiv3.Node{
+				types.UID("1"): {},
 			},
 			map[*apiv3.Node]bool{},
 			&calicoApi.BGPPeerList{
@@ -434,8 +441,8 @@ func TestGenerateBGPPeers(t *testing.T) {
 		},
 		// Route reflector exists
 		{
-			[]corev1.Node{
-				{
+			map[types.UID]*apiv3.Node{
+				types.UID("uid"): {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rr",
 						UID:  "uid",
@@ -450,7 +457,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 							"kubernetes.io/hostname": "node",
 						},
 					},
-				}: true,
+				}: false,
 			},
 			&calicoApi.BGPPeerList{
 				Items: []calicoApi.BGPPeer{
@@ -487,7 +494,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 		},
 		// One route reflector node
 		{
-			[]corev1.Node{},
+			map[types.UID]*apiv3.Node{},
 			map[*apiv3.Node]bool{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -496,7 +503,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 							"rr": "",
 						},
 					},
-				}: true,
+				}: false,
 			},
 			&calicoApi.BGPPeerList{},
 			[]calicoApi.BGPPeer{
@@ -518,8 +525,8 @@ func TestGenerateBGPPeers(t *testing.T) {
 		},
 		// One node one route reflector single zone
 		{
-			[]corev1.Node{
-				{},
+			map[types.UID]*apiv3.Node{
+				types.UID("1"): {},
 			},
 			map[*apiv3.Node]bool{
 				{
@@ -529,7 +536,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 							"kubernetes.io/hostname": "node",
 						},
 					},
-				}: true,
+				}: false,
 			},
 			&calicoApi.BGPPeerList{},
 			[]calicoApi.BGPPeer{
@@ -564,8 +571,8 @@ func TestGenerateBGPPeers(t *testing.T) {
 		},
 		// Three node three route reflector multi zone
 		{
-			[]corev1.Node{
-				{
+			map[types.UID]*apiv3.Node{
+				types.UID("uid"): {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "rr",
 						CreationTimestamp: metav1.NewTime(now),
@@ -575,7 +582,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 						},
 					},
 				},
-				{
+				types.UID("rr2"): {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "rr2",
 						CreationTimestamp: metav1.NewTime(now.Add(time.Second)),
@@ -585,7 +592,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 						},
 					},
 				},
-				{
+				types.UID("rr3"): {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "rr3",
 						CreationTimestamp: metav1.NewTime(now.Add(2 * time.Second)),
@@ -606,7 +613,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 							"kubernetes.io/hostname": "node",
 						},
 					},
-				}: true,
+				}: false,
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						CreationTimestamp: metav1.NewTime(now.Add(time.Second)),
@@ -616,7 +623,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 							"kubernetes.io/hostname": "node2",
 						},
 					},
-				}: true,
+				}: false,
 			},
 			&calicoApi.BGPPeerList{},
 			[]calicoApi.BGPPeer{

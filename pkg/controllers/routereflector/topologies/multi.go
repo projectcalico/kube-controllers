@@ -24,8 +24,8 @@ import (
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	calicoApi "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -64,13 +64,8 @@ func (t *MultiTopology) NewNodeListOptions(nodeLabels map[string]string) metav1.
 }
 
 func (t *MultiTopology) GetRouteReflectorStatuses(nodes map[*apiv3.Node]bool) (statuses []RouteReflectorStatus) {
-	readyNodes := 0
 	perZone := map[string]map[*apiv3.Node]bool{}
-	for n, isReady := range nodes {
-		if isReady {
-			readyNodes++
-		}
-
+	for n := range nodes {
 		zone := n.GetLabels()[t.ZoneLabel]
 		if _, ok := perZone[zone]; !ok {
 			perZone[zone] = map[*apiv3.Node]bool{}
@@ -78,15 +73,14 @@ func (t *MultiTopology) GetRouteReflectorStatuses(nodes map[*apiv3.Node]bool) (s
 		perZone[zone][n] = nodes[n]
 	}
 
-	expRRs := t.single.calculateExpectedNumber(readyNodes)
+	expRRs := t.single.calculateExpectedNumber(countActiveNodes(nodes))
 	expRRsPerZone := int(math.Ceil(float64(expRRs) / float64(len(perZone))))
 
 	for _, zoneNodes := range perZone {
 		status := t.single.GetRouteReflectorStatuses(zoneNodes)[0]
 
 		// TODO On this way it collects info in single and multi too twice
-		_, actualRRs := collectNodeInfo(t.IsRouteReflector, zoneNodes)
-		status.ActualRRs = actualRRs
+		status.ActualRRs = countActiveRouteReflectors(t.IsRouteReflector, zoneNodes)
 		status.ExpectedRRs = expRRsPerZone
 
 		statuses = append(statuses, status)
@@ -99,7 +93,9 @@ func (t *MultiTopology) GetRouteReflectorStatuses(nodes map[*apiv3.Node]bool) (s
 	return
 }
 
-func (t *MultiTopology) GenerateBGPPeers(routeReflectors []corev1.Node, nodes map[*apiv3.Node]bool, existingPeers *calicoApi.BGPPeerList) (toRefresh []calicoApi.BGPPeer, toDelete []calicoApi.BGPPeer) {
+func (t *MultiTopology) GenerateBGPPeers(allNodes map[types.UID]*apiv3.Node, nodes map[*apiv3.Node]bool, existingPeers *calicoApi.BGPPeerList) (toRefresh []calicoApi.BGPPeer, toDelete []calicoApi.BGPPeer) {
+	routeReflectors := t.collectRouteReflectors(allNodes)
+
 	// Sorting RRs and Nodes for deterministic RR for Node selection
 	sort.Slice(routeReflectors, func(i, j int) bool {
 		return routeReflectors[i].GetCreationTimestamp().UnixNano() < routeReflectors[j].GetCreationTimestamp().UnixNano()
@@ -138,14 +134,14 @@ func (t *MultiTopology) GenerateBGPPeers(routeReflectors []corev1.Node, nodes ma
 	rrIndex := -1
 	rrIndexPerZone := map[string]int{}
 	zones := []string{}
-	rrPerZone := map[string][]*corev1.Node{}
+	rrPerZone := map[string][]*apiv3.Node{}
 
 	// Creat per zone RR lists for MZR selection
 	if t.Config.ZoneLabel != "" {
 		for i, rr := range routeReflectors {
 			rrZone := rr.GetLabels()[t.Config.ZoneLabel]
 			log.Debugf("RR:%s's zone: %s", rr.GetName(), rrZone)
-			rrPerZone[rrZone] = append(rrPerZone[rrZone], &routeReflectors[i])
+			rrPerZone[rrZone] = append(rrPerZone[rrZone], routeReflectors[i])
 		}
 
 		for zone := range rrPerZone {
@@ -159,7 +155,7 @@ func (t *MultiTopology) GenerateBGPPeers(routeReflectors []corev1.Node, nodes ma
 			continue
 		}
 
-		routeReflectorsForNode := []*corev1.Node{}
+		routeReflectorsForNode := []*apiv3.Node{}
 
 		// Run MZR selection first
 		if t.Config.ZoneLabel != "" {
@@ -194,7 +190,7 @@ func (t *MultiTopology) GenerateBGPPeers(routeReflectors []corev1.Node, nodes ma
 			rr := routeReflectors[rrIndex]
 			if !isAlreadySelected(routeReflectorsForNode, rr) {
 				log.Debugf("Adding %s to RRs of %s", rr.GetName(), n.GetName())
-				routeReflectorsForNode = append(routeReflectorsForNode, &rr)
+				routeReflectorsForNode = append(routeReflectorsForNode, rr)
 			}
 		}
 
@@ -234,7 +230,24 @@ func (t *MultiTopology) GenerateBGPPeers(routeReflectors []corev1.Node, nodes ma
 	return
 }
 
-func selectRRfromZone(rrIndexPerZone map[string]int, rrPerZone map[string][]*corev1.Node, zone string) *corev1.Node {
+func (t *MultiTopology) getNodeLabel(nodeID string) string {
+	if t.NodeLabelValue == "" {
+		return fmt.Sprintf("%d", getRouteReflectorID(nodeID))
+	}
+	return fmt.Sprintf("%s-%d", t.NodeLabelValue, getRouteReflectorID(nodeID))
+}
+
+func (t *MultiTopology) collectRouteReflectors(allNodes map[types.UID]*apiv3.Node) (rrs []*apiv3.Node) {
+	for _, n := range allNodes {
+		if _, ok := n.GetLabels()[t.NodeLabelKey]; ok {
+			rrs = append(rrs, n)
+		}
+	}
+
+	return
+}
+
+func selectRRfromZone(rrIndexPerZone map[string]int, rrPerZone map[string][]*apiv3.Node, zone string) *apiv3.Node {
 	rrIndexPerZone[zone]++
 	if rrIndexPerZone[zone] == len(rrPerZone[zone]) {
 		rrIndexPerZone[zone] = 0
@@ -242,20 +255,13 @@ func selectRRfromZone(rrIndexPerZone map[string]int, rrPerZone map[string][]*cor
 	return rrPerZone[zone][rrIndexPerZone[zone]]
 }
 
-func isAlreadySelected(rrs []*corev1.Node, r corev1.Node) bool {
+func isAlreadySelected(rrs []*apiv3.Node, r *apiv3.Node) bool {
 	for i := range rrs {
 		if rrs[i].GetName() == r.GetName() {
 			return true
 		}
 	}
 	return false
-}
-
-func (t *MultiTopology) getNodeLabel(nodeID string) string {
-	if t.NodeLabelValue == "" {
-		return fmt.Sprintf("%d", getRouteReflectorID(nodeID))
-	}
-	return fmt.Sprintf("%s-%d", t.NodeLabelValue, getRouteReflectorID(nodeID))
 }
 
 func getRouteReflectorID(nodeID string) uint32 {

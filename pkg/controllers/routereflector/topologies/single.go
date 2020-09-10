@@ -21,9 +21,9 @@ import (
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	calicoApi "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type SingleTopology struct {
@@ -58,8 +58,8 @@ func (t *SingleTopology) NewNodeListOptions(nodeLabels map[string]string) metav1
 					},
 				},
 			}
+			listOptions.LabelSelector = labels.Set(labelSelector.MatchLabels).String()
 		}
-
 	}
 
 	return listOptions
@@ -77,11 +77,11 @@ func (t *SingleTopology) GetRouteReflectorStatuses(nodes map[*apiv3.Node]bool) [
 		return sorted[i].GetCreationTimestamp().UnixNano() < sorted[j].GetCreationTimestamp().UnixNano()
 	})
 
-	readyNodes, actualRRs := collectNodeInfo(t.IsRouteReflector, nodes)
+	actualRRs := countActiveRouteReflectors(t.IsRouteReflector, nodes)
 
 	status := RouteReflectorStatus{
 		ActualRRs:   actualRRs,
-		ExpectedRRs: t.calculateExpectedNumber(readyNodes),
+		ExpectedRRs: t.calculateExpectedNumber(countActiveNodes(nodes)),
 		Nodes:       sorted,
 	}
 
@@ -92,7 +92,7 @@ func (t *SingleTopology) GetRouteReflectorStatuses(nodes map[*apiv3.Node]bool) [
 	return []RouteReflectorStatus{status}
 }
 
-func (t *SingleTopology) GenerateBGPPeers(_ []corev1.Node, _ map[*apiv3.Node]bool, existingPeers *calicoApi.BGPPeerList) ([]calicoApi.BGPPeer, []calicoApi.BGPPeer) {
+func (t *SingleTopology) GenerateBGPPeers(_ map[types.UID]*apiv3.Node, _ map[*apiv3.Node]bool, existingPeers *calicoApi.BGPPeerList) ([]calicoApi.BGPPeer, []calicoApi.BGPPeer) {
 	bgpPeerConfigs := []calicoApi.BGPPeer{}
 
 	rrConfig := findBGPPeer(existingPeers.Items, DefaultRouteReflectorMeshName)

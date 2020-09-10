@@ -3,9 +3,12 @@ module github.com/projectcalico/kube-controllers
 go 1.14
 
 require (
+	github.com/Workiva/go-datastructures v1.0.50
 	github.com/apparentlymart/go-cidr v1.0.1
 	github.com/joho/godotenv v1.3.0
 	github.com/kelseyhightower/envconfig v0.0.0-20180517194557-dd1402a4d99d
+	github.com/libopenstorage/openstorage v1.0.0
+	github.com/mhmxs/calico-route-reflector-operator v0.1.0
 	github.com/onsi/ginkgo v1.12.1
 	github.com/onsi/gomega v1.10.1
 	github.com/patrickmn/go-cache v0.0.0-20180815053127-5633e0862627
@@ -51,3 +54,7 @@ replace (
 	k8s.io/metrics => k8s.io/metrics v0.17.2
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.17.2
 )
+
+replace github.com/projectcalico/libcalico-go => ../libcalico-go
+
+replace github.com/projectcalico/felix => ../felix

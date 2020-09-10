@@ -50,13 +50,10 @@ func TestCollectNodeInfo(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{UID: "rr"}}: true,
 	}
 
-	readyNodes, actualRRs := collectNodeInfo(func(UID string, _ map[string]string) bool {
+	actualRRs := countActiveRouteReflectors(func(UID string, _ map[string]string) bool {
 		return UID == "rr"
 	}, nodes)
 
-	if readyNodes != 2 {
-		t.Errorf("Ready nodes are wrong %d != %d", 2, readyNodes)
-	}
 	if actualRRs != 1 {
 		t.Errorf("Actual RRs are wrong %d != %d", 1, actualRRs)
 	}

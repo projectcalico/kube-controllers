@@ -17,13 +17,13 @@ package routereflector
 import (
 	"os"
 	"strings"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
-func parseEnv() (string, map[string]*string) {
-	zoneLable := os.Getenv("ROUTE_REFLECTOR_ZONE_LABEL")
-
+func parseIncompatibleLabels(env string) map[string]*string {
 	incompatibleLabels := map[string]*string{}
-	if v, ok := os.LookupEnv("ROUTE_REFLECTOR_INCOMPATIBLE_NODE_LABELS"); ok {
+	if v, ok := os.LookupEnv(env); ok {
 		for _, l := range strings.Split(v, ",") {
 			key, value := getKeyValue(strings.Trim(l, " "))
 			if strings.Contains(l, "=") {
@@ -34,7 +34,7 @@ func parseEnv() (string, map[string]*string) {
 		}
 	}
 
-	return zoneLable, incompatibleLabels
+	return incompatibleLabels
 }
 
 func getKeyValue(label string) (string, string) {
@@ -44,4 +44,37 @@ func getKeyValue(label string) (string, string) {
 	}
 
 	return keyValue[0], keyValue[1]
+}
+
+func isNodeReady(node *corev1.Node) bool {
+	for _, c := range node.Status.Conditions {
+		if c.Type == corev1.NodeReady {
+			return c.Status == "True"
+		}
+	}
+
+	return false
+}
+
+func isNodeSchedulable(node *corev1.Node) bool {
+	if node.Spec.Unschedulable == true {
+		return false
+	}
+	for _, taint := range node.Spec.Taints {
+		if _, ok := notReadyTaints[taint.Key]; ok {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isNodeCompatible(node *corev1.Node, antyAfiinity map[string]*string) bool {
+	for k, v := range node.GetLabels() {
+		if iv, ok := antyAfiinity[k]; ok && (iv == nil || *iv == v) {
+			return false
+		}
+	}
+
+	return true
 }

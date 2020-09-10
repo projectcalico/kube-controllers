@@ -20,11 +20,9 @@ import (
 	"github.com/projectcalico/kube-controllers/pkg/controllers/routereflector/topologies"
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	calicoApi "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	calicoClient "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/options"
-	"github.com/projectcalico/libcalico-go/lib/watch"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type mockTopology struct {
@@ -48,53 +46,29 @@ func (m mockTopology) NewNodeListOptions(labels map[string]string) metav1.ListOp
 	return metav1.ListOptions{}
 }
 
-func (m mockTopology) GetRouteReflectorStatuses(nodes map[*apiv3.Node]bool) []topologies.RouteReflectorStatus {
+func (m mockTopology) GetRouteReflectorStatuses(map[*apiv3.Node]bool) []topologies.RouteReflectorStatus {
 	return nil
 }
 
-func (m mockTopology) GenerateBGPPeers([]corev1.Node, map[*apiv3.Node]bool, *calicoApi.BGPPeerList) ([]calicoApi.BGPPeer, []calicoApi.BGPPeer) {
+func (m mockTopology) GenerateBGPPeers(map[types.UID]*apiv3.Node, map[*apiv3.Node]bool, *calicoApi.BGPPeerList) ([]calicoApi.BGPPeer, []calicoApi.BGPPeer) {
 	return nil, nil
 }
 
 type mockCalicoClient struct {
-	mockNodeInterface calicoClient.NodeInterface
-}
-
-func (m mockCalicoClient) Nodes() calicoClient.NodeInterface {
-	return m.mockNodeInterface
-}
-
-type mockNodeInterface struct {
 	update func(*calicoApi.Node) (*calicoApi.Node, error)
 	list   func() (*calicoApi.NodeList, error)
 }
 
-func (m mockNodeInterface) Create(context.Context, *calicoApi.Node, options.SetOptions) (*calicoApi.Node, error) {
-	return nil, nil
-}
-
-func (m mockNodeInterface) Update(_ context.Context, node *calicoApi.Node, _ options.SetOptions) (*calicoApi.Node, error) {
+func (m mockCalicoClient) Update(_ context.Context, node *calicoApi.Node, _ options.SetOptions) (*calicoApi.Node, error) {
 	if m.update != nil {
 		return m.update(node)
 	}
 	return nil, nil
 }
 
-func (m mockNodeInterface) Delete(context.Context, string, options.DeleteOptions) (*calicoApi.Node, error) {
-	return nil, nil
-}
-
-func (m mockNodeInterface) Get(context.Context, string, options.GetOptions) (*calicoApi.Node, error) {
-	return nil, nil
-}
-
-func (m mockNodeInterface) List(context.Context, options.ListOptions) (*calicoApi.NodeList, error) {
+func (m mockCalicoClient) List(context.Context, options.ListOptions) (*calicoApi.NodeList, error) {
 	if m.list != nil {
 		return m.list()
 	}
-	return nil, nil
-}
-
-func (m mockNodeInterface) Watch(context.Context, options.ListOptions) (watch.Interface, error) {
 	return nil, nil
 }

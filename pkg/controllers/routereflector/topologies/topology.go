@@ -17,8 +17,8 @@ package topologies
 import (
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	calicoApi "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
@@ -40,7 +40,7 @@ type Topology interface {
 	GetNodeLabel(string) (string, string)
 	NewNodeListOptions(labels map[string]string) metav1.ListOptions
 	GetRouteReflectorStatuses(map[*apiv3.Node]bool) []RouteReflectorStatus
-	GenerateBGPPeers([]corev1.Node, map[*apiv3.Node]bool, *calicoApi.BGPPeerList) ([]calicoApi.BGPPeer, []calicoApi.BGPPeer)
+	GenerateBGPPeers(map[types.UID]*apiv3.Node, map[*apiv3.Node]bool, *calicoApi.BGPPeerList) ([]calicoApi.BGPPeer, []calicoApi.BGPPeer)
 }
 
 type Config struct {
@@ -75,13 +75,20 @@ func findBGPPeer(peers []calicoApi.BGPPeer, name string) *calicoApi.BGPPeer {
 	return nil
 }
 
-func collectNodeInfo(isRouteReflector func(string, map[string]string) bool, nodes map[*apiv3.Node]bool) (readyNodes, actualRRs int) {
-	for n, isReady := range nodes {
+func countActiveNodes(nodes map[*apiv3.Node]bool) (actualNodes int) {
+	for _, isReady := range nodes {
 		if isReady {
-			readyNodes++
-			if isRouteReflector(string(n.GetUID()), n.GetLabels()) {
-				actualRRs++
-			}
+			actualNodes++
+		}
+	}
+
+	return
+}
+
+func countActiveRouteReflectors(isRouteReflector func(string, map[string]string) bool, nodes map[*apiv3.Node]bool) (actualRRs int) {
+	for n, isReady := range nodes {
+		if isReady && isRouteReflector(string(n.GetUID()), n.GetLabels()) {
+			actualRRs++
 		}
 	}
 
