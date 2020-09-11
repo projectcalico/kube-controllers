@@ -46,6 +46,7 @@ import (
 	"github.com/projectcalico/kube-controllers/pkg/controllers/networkpolicy"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/node"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/pod"
+	"github.com/projectcalico/kube-controllers/pkg/controllers/routereflector"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/serviceaccount"
 	"github.com/projectcalico/kube-controllers/pkg/status"
 )
@@ -409,6 +410,10 @@ func (cc *controllerControl) InitControllers(ctx context.Context, cfg config.Run
 	if cfg.Controllers.ServiceAccount != nil {
 		serviceAccountController := serviceaccount.NewServiceAccountController(ctx, k8sClientset, calicoClient, *cfg.Controllers.ServiceAccount)
 		cc.controllers["ServiceAccount"] = serviceAccountController
+	}
+	if cfg.Controllers.RouteReflector != nil {
+		routeReflectorController := routereflector.NewRouteReflectorController(ctx, k8sClientset, calicoClient, *cfg.Controllers.RouteReflector)
+		cc.controllers["RouteReflector"] = routeReflectorController
 	}
 }
 
