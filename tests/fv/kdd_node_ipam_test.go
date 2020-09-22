@@ -154,11 +154,11 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 			apiserver.Stop()
 
 			By("Waiting for the readiness to change")
-			Eventually(func() []byte {
+			Eventually(func() string {
 				cmd := exec.Command("docker", "exec", policyController.Name, "/usr/bin/check-status", "-r")
 				stdoutStderr, _ := cmd.CombinedOutput()
 
-				return stdoutStderr
+				return string(stdoutStderr)
 			}, 20*time.Second, 500*time.Millisecond).Should(ContainSubstring("Error reaching apiserver"))
 		})
 	})
