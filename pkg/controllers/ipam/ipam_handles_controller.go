@@ -63,7 +63,7 @@ func NewController(ctx context.Context, calicoClient client.Interface) controlle
 
 	// Setup event handlers
 	handlers := cache.ResourceEventHandlerFuncs{
-		DeleteFunc: func(obj interface{}) {
+		UpdateFunc: func(oldObj, newObj interface{}) {
 			// Kick to start a resync.
 			kick(nc.schedule)
 		},
@@ -117,7 +117,6 @@ func (c *IPAMController) acceptScheduleRequests(stopCh <-chan struct{}) {
 		select {
 		case <-c.schedule:
 			// Mark for rate limiting so we don't do this too often.
-			time.Sleep(c.rl.When(RateLimitSyncHandles))
 			err := c.syncDelete()
 			if err != nil {
 				// Reschedule the sync since we hit an error. Note that
@@ -125,6 +124,11 @@ func (c *IPAMController) acceptScheduleRequests(stopCh <-chan struct{}) {
 				// reschedule immediately.
 				kick(c.schedule)
 			}
+
+			// Simple batching. We might receive lots of kicks on the schedule queue
+			// at once if lots of pods are deleted. Rather than call syncDelete for each,
+			// we can condense the events slightly.
+			time.Sleep(1 * time.Second)
 		case <-stopCh:
 			return
 		}
@@ -132,6 +136,7 @@ func (c *IPAMController) acceptScheduleRequests(stopCh <-chan struct{}) {
 }
 
 func (c *IPAMController) syncDelete() error {
+	time.Sleep(c.rl.When(RateLimitSyncHandles))
 	handles := c.indexer.List()
 	logrus.Debugf("Found %d IPAM handles", len(handles))
 	for _, h := range handles {
@@ -140,7 +145,7 @@ func (c *IPAMController) syncDelete() error {
 			continue
 		}
 
-		// Release the IP, which will also finalize the handle.
+		// Release any IPs with this handle.
 		handleID := u.Spec.HandleID
 		log.Infof("Found orphaned IPAM handle: %s", handleID)
 		if err := c.calicoClient.IPAM().ReleaseByHandle(c.ctx, handleID); err != nil {
@@ -151,6 +156,7 @@ func (c *IPAMController) syncDelete() error {
 		}
 	}
 	logrus.Debugf("Finished ipam handle GC cycle")
+	c.rl.Forget(RateLimitSyncHandles)
 	return nil
 }
 
