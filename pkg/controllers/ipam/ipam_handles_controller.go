@@ -116,7 +116,6 @@ func (c *IPAMController) acceptScheduleRequests(stopCh <-chan struct{}) {
 		// Wait until something wakes us up, or we are stopped
 		select {
 		case <-c.schedule:
-			// Mark for rate limiting so we don't do this too often.
 			err := c.syncDelete()
 			if err != nil {
 				// Reschedule the sync since we hit an error. Note that
@@ -139,25 +138,38 @@ func (c *IPAMController) syncDelete() error {
 	time.Sleep(c.rl.When(RateLimitSyncHandles))
 	handles := c.indexer.List()
 	logrus.Debugf("Found %d IPAM handles", len(handles))
+	var storedErr error
 	for _, h := range handles {
 		u := h.(*v3.IPAMHandle)
-		if u.GetDeletionTimestamp() == nil {
+		if u.GetDeletionTimestamp() == nil || len(u.Finalizers) == 0 {
 			continue
 		}
 
-		// Release any IPs with this handle.
+		// Configure fields for logging.
+		ref := u.GetOwnerReferences()
 		handleID := u.Spec.HandleID
-		log.Infof("Found orphaned IPAM handle: %s", handleID)
-		if err := c.calicoClient.IPAM().ReleaseByHandle(c.ctx, handleID); err != nil {
-			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); !ok {
+		fields := log.Fields{"handle": handleID, "ownerReferences": ref}
+
+		// Release any IPs with this handle.
+		log.WithFields(fields).Info("Found finalizing IPAM handle, attempt to release it")
+		if err := c.calicoClient.IPAM().ReleaseByHandleObject(c.ctx, h.(*v3.IPAMHandle)); err != nil {
+			if _, ok := err.(cerrors.ErrorResourceUpdateConflict); ok {
+				// Probably a race with the CNI plugin. We'll retry again later.
+				log.WithError(err).Debug("Conflict releasing IP, will retry if needed")
+			} else if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
+				// Already deleted. Nothing to do.
+			} else {
+				// Unexpected error.
 				logrus.WithError(err).Error("Failed to release IP")
-				return err
+				storedErr = err
 			}
 		}
 	}
-	logrus.Debugf("Finished ipam handle GC cycle")
-	c.rl.Forget(RateLimitSyncHandles)
-	return nil
+	if storedErr == nil {
+		c.rl.Forget(RateLimitSyncHandles)
+	}
+	logrus.WithError(storedErr).Debugf("Finished ipam handle GC cycle")
+	return storedErr
 }
 
 // kick puts an item on the channel in non-blocking write. This means if there

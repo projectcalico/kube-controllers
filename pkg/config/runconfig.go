@@ -82,6 +82,10 @@ type ControllersConfig struct {
 	WorkloadEndpoint *GenericControllerConfig
 	ServiceAccount   *GenericControllerConfig
 	Namespace        *GenericControllerConfig
+	IPAMHandle       *IPAMHandleControllerConfig
+}
+
+type IPAMHandleControllerConfig struct {
 }
 
 type GenericControllerConfig struct {
@@ -499,6 +503,9 @@ func mergeEnabledControllers(envVars map[string]string, status *v3.KubeControlle
 	s := ac.ServiceAccount
 	ns := ac.Namespace
 
+	// CASEY: TODO: Requires libcalico change.
+	ipamHandle := &IPAMHandleControllerConfig{}
+
 	v, p := envVars[EnvEnabledControllers]
 	if p {
 		status.EnvironmentVars[EnvEnabledControllers] = v
@@ -519,6 +526,10 @@ func mergeEnabledControllers(envVars map[string]string, status *v3.KubeControlle
 			case "serviceaccount":
 				rc.ServiceAccount = &GenericControllerConfig{}
 				sc.ServiceAccount = &v3.ServiceAccountControllerConfig{}
+			case "ipamhandle":
+				rc.IPAMHandle = &IPAMHandleControllerConfig{}
+				// CASEY: TODO: Requires libcalico change.
+				//sc.IPAMHandle = &v3.IPAMHandleControllerConfig{}
 			case "flannelmigration":
 				log.WithField(EnvEnabledControllers, v).Fatal("cannot run flannelmigration with other controllers")
 			default:
@@ -556,6 +567,12 @@ func mergeEnabledControllers(envVars map[string]string, status *v3.KubeControlle
 		if ns != nil {
 			rc.Namespace = &GenericControllerConfig{}
 			sc.Namespace = &v3.NamespaceControllerConfig{}
+		}
+
+		if ipamHandle != nil {
+			rc.IPAMHandle = &IPAMHandleControllerConfig{}
+			// CASEY: TODO: Requires libcalico change.
+			//sc.IPAMHandle = &v3.IPAMHandleControllerConfig{}
 		}
 	}
 

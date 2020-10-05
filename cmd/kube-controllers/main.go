@@ -395,9 +395,9 @@ func (cc *controllerControl) InitControllers(ctx context.Context, cfg config.Run
 		serviceAccountController := serviceaccount.NewServiceAccountController(ctx, k8sClientset, calicoClient, *cfg.Controllers.ServiceAccount)
 		cc.controllers["ServiceAccount"] = serviceAccountController
 	}
-
-	// CASEY: TODO: Always run the IPAM controller.
-	cc.controllers["IPAMHandle"] = ipam.NewController(ctx, calicoClient)
+	if cfg.Controllers.IPAMHandle != nil {
+		cc.controllers["IPAMHandle"] = ipam.NewController(ctx, calicoClient)
+	}
 }
 
 // Runs all the controllers and blocks until we get a restart.
