@@ -1,6 +1,6 @@
 module github.com/projectcalico/kube-controllers
 
-go 1.14
+go 1.15
 
 require (
 	github.com/apparentlymart/go-cidr v1.0.1
@@ -50,3 +50,7 @@ replace (
 	k8s.io/metrics => k8s.io/metrics v0.17.2
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.17.2
 )
+
+replace github.com/projectcalico/libcalico-go => ../libcalico-go
+
+replace github.com/projectcalico/felix => ../felix

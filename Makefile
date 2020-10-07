@@ -1,5 +1,5 @@
 PACKAGE_NAME=github.com/projectcalico/kube-controllers
-GO_BUILD_VER=v0.45
+GO_BUILD_VER=v0.48
 
 ###############################################################################
 # Download and include Makefile.common

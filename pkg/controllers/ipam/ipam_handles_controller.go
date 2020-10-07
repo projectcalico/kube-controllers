@@ -145,14 +145,18 @@ func (c *IPAMController) syncDelete() error {
 			continue
 		}
 
-		// Configure fields for logging.
-		ref := u.GetOwnerReferences()
+		// Get identifying information.
 		handleID := u.Spec.HandleID
+		rv := u.GetResourceVersion()
+		uid := u.GetUID()
+		ref := u.GetOwnerReferences()
+
+		// Configure fields for logging.
 		fields := log.Fields{"handle": handleID, "ownerReferences": ref}
 
 		// Release any IPs with this handle.
 		log.WithFields(fields).Info("Found finalizing IPAM handle, attempt to release it")
-		if err := c.calicoClient.IPAM().ReleaseByHandleObject(c.ctx, h.(*v3.IPAMHandle)); err != nil {
+		if err := c.calicoClient.IPAM().ReleaseByHandle(c.ctx, handleID, rv, &uid); err != nil {
 			if _, ok := err.(cerrors.ErrorResourceUpdateConflict); ok {
 				// Probably a race with the CNI plugin. We'll retry again later.
 				log.WithError(err).Debug("Conflict releasing IP, will retry if needed")

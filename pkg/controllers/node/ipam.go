@@ -197,7 +197,7 @@ func (c *NodeController) cleanupNode(cnode string, allocations []model.Allocatio
 	logc := log.WithField("calicoNode", cnode)
 	retry := false
 	for _, a := range allocations {
-		if err := c.calicoClient.IPAM().ReleaseByHandle(c.ctx, *a.AttrPrimary); err != nil {
+		if err := c.calicoClient.IPAM().ReleaseByHandle(c.ctx, *a.AttrPrimary, "", nil); err != nil {
 			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
 				// If it doesn't exist, we're OK, since we don't want it to!
 				// Try to release any other allocations, but we'll still return an error
