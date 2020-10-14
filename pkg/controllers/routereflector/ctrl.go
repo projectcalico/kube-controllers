@@ -15,6 +15,9 @@
 package routereflector
 
 import (
+	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/projectcalico/kube-controllers/pkg/controllers/routereflector/datastores"
@@ -35,9 +38,38 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+const (
+	defaultClusterID                = "224.0.0.0"
+	defaultRouteReflectorMin        = 3
+	defaultRouteReflectorMax        = 10
+	defaultRouteReflectorRatio      = 0.005
+	defaultRouteReflectorRatioMin   = 0.001
+	defaultRouteReflectorRatioMax   = 0.05
+	defaultRouteReflectorLabelKey   = "calico-route-reflector"
+	defaultRouteReflectorLabelValue = ""
+	defaultZoneLabel                = "failure-domain.beta.kubernetes.io/zone"
+)
+
+var notReadyTaints = map[string]bool{
+	"node.kubernetes.io/not-ready":                   false,
+	"node.kubernetes.io/unreachable":                 false,
+	"node.kubernetes.io/out-of-disk":                 false,
+	"node.kubernetes.io/memory-pressure":             false,
+	"node.kubernetes.io/disk-pressure":               false,
+	"node.kubernetes.io/network-unavailable":         false,
+	"node.kubernetes.io/unschedulable":               false,
+	"node.cloudprovider.kubernetes.io/uninitialized": false,
+}
+
 type ctrl struct {
-	k8sNodeClient                 k8sNodeClient
-	routeReflectorsUnderOperation map[types.UID]bool
+	isEnabled   bool
+	updateMutex sync.Mutex
+
+	calicoNodeClient client.NodeInterface
+	k8sNodeClient    k8sNodeClient
+
+	configSyncer bapi.Syncer
+	config       *apiv3.RouteReflectorControllerConfig
 
 	kubeNodeInformer cache.Controller
 	kubeNodes        map[types.UID]*corev1.Node
@@ -49,13 +81,17 @@ type ctrl struct {
 	bgpPeers      map[*apiv3.BGPPeer]interface{}
 	bgpPeer       bgpPeer
 
-	nodeLabelKey       string
-	incompatibleLabels map[string]*string
+	routeReflectorsUnderOperation map[types.UID]bool
+
 	topology           topologies.Topology
 	datastore          datastores.Datastore
+	incompatibleLabels map[string]*string
 }
 
 func (c *ctrl) Run(stopCh chan struct{}) {
+	// Start the configuration syncer
+	go c.configSyncer.Start()
+
 	if c.datastore.GetType() == apiconfig.EtcdV3 {
 		// Start the Calico node syncer.
 		go c.calicoNodeSyncer.Start()
@@ -83,6 +119,13 @@ func (c *ctrl) initSyncers(client client.Interface, k8sClientset *kubernetes.Cli
 		Backend() bapi.Client
 	}
 
+	controllerConfigResources := []watchersyncer.ResourceType{
+		{
+			ListInterface: model.ResourceListOptions{Kind: apiv3.KindKubeControllersConfiguration},
+		},
+	}
+	c.configSyncer = watchersyncer.New(client.(accessor).Backend(), controllerConfigResources, &configSyncer{c})
+
 	calicoNodeResources := []watchersyncer.ResourceType{
 		{
 			ListInterface: model.ResourceListOptions{Kind: apiv3.KindNode},
@@ -109,4 +152,44 @@ func (c *ctrl) initSyncers(client client.Interface, k8sClientset *kubernetes.Cli
 	// Informer handles managing the watch and signals us when nodes are deleted.
 	// also syncs up labels between k8s/calico node objects
 	_, c.kubeNodeInformer = cache.NewIndexerInformer(kubeNodeWatcher, &v1.Node{}, 0, handlers, cache.Indexers{})
+}
+
+func (c *ctrl) updateConfiguration() {
+	topologyConfig := topologies.Config{
+		NodeLabelKey:   orDefaultString(c.config.RouteReflectorLabelKey, defaultRouteReflectorLabelKey),
+		NodeLabelValue: orDefaultString(c.config.RouteReflectorLabelValue, defaultRouteReflectorLabelValue),
+		ZoneLabel:      orDefaultString(c.config.ZoneLabel, defaultZoneLabel),
+		ClusterID:      orDefaultString(c.config.ClusterID, defaultClusterID),
+		Min:            orDefaultInt(c.config.Min, defaultRouteReflectorMin),
+		Max:            orDefaultInt(c.config.Max, defaultRouteReflectorMax),
+		Ration:         float64(orDefaultFloat(c.config.Ratio, defaultRouteReflectorRatio)),
+	}
+	log.Infof("Topology config: %v", topologyConfig)
+
+	c.topology = topologies.NewMultiTopology(topologyConfig)
+
+	dsType := string(apiconfig.EtcdV3)
+	if c.config.DatastoreType != nil {
+		dsType = *c.config.DatastoreType
+	}
+	switch dsType {
+	case string(apiconfig.Kubernetes):
+		c.datastore = datastores.NewKddDatastore(c.topology)
+	case string(apiconfig.EtcdV3):
+		c.datastore = datastores.NewEtcdDatastore(c.topology, c.calicoNodeClient)
+	default:
+		panic(fmt.Errorf("Unsupported Data Store %s", dsType))
+	}
+
+	c.incompatibleLabels = map[string]*string{}
+	if c.config.IncompatibleLabels != nil {
+		for _, l := range strings.Split(*c.config.IncompatibleLabels, ",") {
+			key, value := getKeyValue(strings.Trim(l, " "))
+			if strings.Contains(l, "=") {
+				c.incompatibleLabels[key] = &value
+			} else {
+				c.incompatibleLabels[key] = nil
+			}
+		}
+	}
 }

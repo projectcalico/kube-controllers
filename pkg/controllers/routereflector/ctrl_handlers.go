@@ -21,6 +21,39 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+type configSyncer struct {
+	*ctrl
+}
+
+func (c *configSyncer) OnStatusUpdated(status bapi.SyncStatus) {
+}
+
+func (c *configSyncer) OnUpdates(updates []bapi.Update) {
+	c.ctrl.updateMutex.Lock()
+	defer c.ctrl.updateMutex.Unlock()
+
+	// Update local cache.
+	log.Debug("Controller config syncer received updates: %#v", updates)
+	for _, upd := range updates {
+		switch upd.UpdateType {
+		case bapi.UpdateTypeKVNew:
+			log.Debug("New Controller config")
+			fallthrough
+		case bapi.UpdateTypeKVUpdated, bapi.UpdateTypeKVUnknown:
+			log.Debug("Controller config updated")
+			config := upd.KVPair.Value.(*apiv3.KubeControllersConfiguration)
+			c.ctrl.config = config.Spec.Controllers.RouteReflector
+			c.ctrl.isEnabled = c.ctrl.config != nil
+			if c.ctrl.isEnabled {
+				c.ctrl.updateConfiguration()
+			}
+		default:
+			log.Infof("Controller config unhandled update type %d", upd.UpdateType)
+		}
+	}
+	log.Debug("RouteReflector config: %#v", c.ctrl.config)
+}
+
 type calicoNodeSyncer struct {
 	*ctrl
 }
@@ -29,6 +62,9 @@ func (c *calicoNodeSyncer) OnStatusUpdated(status bapi.SyncStatus) {
 }
 
 func (c *calicoNodeSyncer) OnUpdates(updates []bapi.Update) {
+	c.ctrl.updateMutex.Lock()
+	defer c.ctrl.updateMutex.Unlock()
+
 	// Update local cache.
 	log.Debug("RR Calico node syncer received updates: %#v", updates)
 	for _, upd := range updates {
@@ -48,7 +84,7 @@ func (c *calicoNodeSyncer) OnUpdates(updates []bapi.Update) {
 			n := upd.KVPair.Value.(*apiv3.Node)
 			delete(c.calicoNodes, n.GetUID())
 		default:
-			log.Errorf("Unhandled update type")
+			log.Errorf("Calico node unhandled update type %d", upd.UpdateType)
 		}
 	}
 	log.Debug("Calico node cache: %#v", c.calicoNodes)
@@ -62,6 +98,9 @@ func (c *bgpPeerSyncer) OnStatusUpdated(status bapi.SyncStatus) {
 }
 
 func (c *bgpPeerSyncer) OnUpdates(updates []bapi.Update) {
+	c.ctrl.updateMutex.Lock()
+	defer c.ctrl.updateMutex.Unlock()
+
 	// Update local cache.
 	log.Debug("RR BGP peer syncer received updates: %#v", updates)
 	for _, upd := range updates {
@@ -81,13 +120,16 @@ func (c *bgpPeerSyncer) OnUpdates(updates []bapi.Update) {
 			p := upd.KVPair.Value.(*apiv3.BGPPeer)
 			delete(c.bgpPeers, p)
 		default:
-			log.Errorf("Unhandled update type")
+			log.Errorf("BGP peer unhandled update type %d", upd.UpdateType)
 		}
 	}
 	log.Debug("BGP peer cache: %#v", c.calicoNodes)
 }
 
 func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
+	c.updateMutex.Lock()
+	defer c.updateMutex.Unlock()
+
 	log.Debug("Kube node updated")
 	newKubeNode, ok := newObj.(*corev1.Node)
 	if !ok {
@@ -97,19 +139,28 @@ func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
 
 	c.kubeNodes[newKubeNode.GetUID()] = newKubeNode
 
-	if err := c.update(newKubeNode); err != nil {
-		log.Errorf("Unable to update Kubernetes node %s because of %s", newKubeNode.GetName(), err)
+	if c.isEnabled {
+		if err := c.update(newKubeNode); err != nil {
+			log.Errorf("Unable to update Kubernetes node %s because of %s", newKubeNode.GetName(), err)
+		}
 	}
 }
 
 func (c *ctrl) OnKubeDelete(obj interface{}) {
+	c.updateMutex.Lock()
+	defer c.updateMutex.Unlock()
+
 	kubeNode, ok := obj.(*corev1.Node)
 	if !ok {
 		log.Errorf("Given resource type can't handle %v", obj)
 		return
 	}
-	if err := c.delete(kubeNode); err != nil {
-		log.Errorf("Unable to delete Kubernetes node %s because of %s", kubeNode.GetName(), err)
+
+	if c.isEnabled {
+		if err := c.delete(kubeNode); err != nil {
+			log.Errorf("Unable to delete Kubernetes node %s because of %s", kubeNode.GetName(), err)
+		}
 	}
+
 	delete(c.kubeNodes, kubeNode.GetUID())
 }

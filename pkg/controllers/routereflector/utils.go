@@ -15,6 +15,8 @@
 package routereflector
 
 import (
+	"strings"
+
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -49,4 +51,34 @@ func isNodeCompatible(node *corev1.Node, antyAfiinity map[string]*string) bool {
 	}
 
 	return true
+}
+
+func getKeyValue(label string) (string, string) {
+	keyValue := strings.Split(label, "=")
+	if len(keyValue) == 1 {
+		keyValue[1] = ""
+	}
+
+	return keyValue[0], keyValue[1]
+}
+
+func orDefaultString(value *string, defaultValue string) string {
+	if value == nil {
+		return defaultValue
+	}
+	return *value
+}
+
+func orDefaultInt(value *int, defaultValue int) int {
+	if value == nil {
+		return defaultValue
+	}
+	return *value
+}
+
+func orDefaultFloat(value *float32, defaultValue float32) float32 {
+	if value == nil {
+		return defaultValue
+	}
+	return *value
 }
