@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	DefaultStatusFile = "status.json"
+	DefaultStatusFile = "/status/status.json"
 )
 
 type ConditionStatus struct {
