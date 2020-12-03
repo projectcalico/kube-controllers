@@ -42,9 +42,17 @@ func (c *configSyncer) OnUpdates(updates []bapi.Update) {
 		case bapi.UpdateTypeKVUpdated, bapi.UpdateTypeKVUnknown:
 			log.Debug("Controller config updated")
 			config := upd.KVPair.Value.(*apiv3.KubeControllersConfiguration)
-			c.ctrl.config = config.Spec.Controllers.RouteReflector
-			c.ctrl.isEnabled = c.ctrl.config != nil
-			if c.ctrl.isEnabled {
+			rrConfig := config.Spec.Controllers.RouteReflector
+			// TODO find a better way to map
+			if rrConfig != nil {
+				c.ctrl.config.ClusterID = rrConfig.ClusterID
+				c.ctrl.config.Min = rrConfig.Min
+				c.ctrl.config.Max = rrConfig.Max
+				c.ctrl.config.Ratio = rrConfig.Ratio
+				c.ctrl.config.RouteReflectorLabelKey = rrConfig.RouteReflectorLabelKey
+				c.ctrl.config.RouteReflectorLabelValue = rrConfig.RouteReflectorLabelValue
+				c.ctrl.config.ZoneLabel = rrConfig.ZoneLabel
+				c.ctrl.config.IncompatibleLabels = rrConfig.IncompatibleLabels
 				c.ctrl.updateConfiguration()
 			}
 		default:
@@ -139,10 +147,8 @@ func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
 
 	c.kubeNodes[newKubeNode.GetUID()] = newKubeNode
 
-	if c.isEnabled {
-		if err := c.update(newKubeNode); err != nil {
-			log.Errorf("Unable to update Kubernetes node %s because of %s", newKubeNode.GetName(), err)
-		}
+	if err := c.update(newKubeNode); err != nil {
+		log.Errorf("Unable to update Kubernetes node %s because of %s", newKubeNode.GetName(), err)
 	}
 }
 
@@ -156,10 +162,8 @@ func (c *ctrl) OnKubeDelete(obj interface{}) {
 		return
 	}
 
-	if c.isEnabled {
-		if err := c.delete(kubeNode); err != nil {
-			log.Errorf("Unable to delete Kubernetes node %s because of %s", kubeNode.GetName(), err)
-		}
+	if err := c.delete(kubeNode); err != nil {
+		log.Errorf("Unable to delete Kubernetes node %s because of %s", kubeNode.GetName(), err)
 	}
 
 	delete(c.kubeNodes, kubeNode.GetUID())

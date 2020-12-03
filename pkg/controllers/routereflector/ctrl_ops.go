@@ -15,6 +15,7 @@
 package routereflector
 
 import (
+	"context"
 	"time"
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
@@ -76,13 +77,13 @@ func (c *ctrl) revertFailedModification() error {
 		}
 
 		log.Infof("Revert route reflector label on %s to %t", kubeNode.GetName(), !status)
-		kubeNode, err := c.k8sNodeClient.Get(kubeNode.GetName(), metav1.GetOptions{})
+		kubeNode, err := c.k8sNodeClient.Get(context.Background(), kubeNode.GetName(), metav1.GetOptions{})
 		if err != nil {
 			log.Errorf("Unable to fetch kube node %s because of %s", kubeNode.GetName(), err.Error())
 			return err
 		}
 
-		if _, err := c.k8sNodeClient.Update(kubeNode); err != nil {
+		if _, err := c.k8sNodeClient.Update(context.Background(), kubeNode, metav1.UpdateOptions{}); err != nil {
 			log.Errorf("Failed to revert update node %s because of %s", kubeNode.GetName(), err.Error())
 			return err
 		}
@@ -183,7 +184,7 @@ func (c *ctrl) removeRRStatus(kubeNode *corev1.Node) error {
 	}
 
 	log.Infof("Removing route reflector label from %s", kubeNode.GetName())
-	if _, err := c.k8sNodeClient.Update(kubeNode); err != nil {
+	if _, err := c.k8sNodeClient.Update(context.Background(), kubeNode, metav1.UpdateOptions{}); err != nil {
 		log.Errorf("Unable to cleanup node %s because of %s", kubeNode.GetName(), err.Error())
 		return err
 	}
@@ -215,7 +216,7 @@ func (c *ctrl) updateRRStatus(kubeNode *corev1.Node, diff int) (bool, error) {
 		log.Infof("Adding route reflector label to %s", kubeNode.GetName())
 	}
 
-	if _, err := c.k8sNodeClient.Update(kubeNode); err != nil {
+	if _, err := c.k8sNodeClient.Update(context.Background(), kubeNode, metav1.UpdateOptions{}); err != nil {
 		log.Errorf("Unable to update node %s because of %s", kubeNode.GetName(), err.Error())
 		return false, err
 	}

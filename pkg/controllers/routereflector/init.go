@@ -20,6 +20,7 @@ import (
 
 	"github.com/projectcalico/kube-controllers/pkg/config"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/controller"
+	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	corev1 "k8s.io/api/core/v1"
 
@@ -29,20 +30,25 @@ import (
 )
 
 type k8sNodeClient interface {
-	Get(string, metav1.GetOptions) (*corev1.Node, error)
-	List(metav1.ListOptions) (*corev1.NodeList, error)
-	Update(*corev1.Node) (*corev1.Node, error)
+	Get(context.Context, string, metav1.GetOptions) (*corev1.Node, error)
+	List(context.Context, metav1.ListOptions) (*corev1.NodeList, error)
+	Update(context.Context, *corev1.Node, metav1.UpdateOptions) (*corev1.Node, error)
 }
 
-func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.Clientset, calicoClient client.Interface, cfg config.GenericControllerConfig) controller.Controller {
+func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.Clientset, calicoClient client.Interface, cfg config.RouteReflectorControllerConfig) controller.Controller {
 	ctrl := &ctrl{
 		updateMutex:                   sync.Mutex{},
+		dsType:                        cfg.DatastoreType,
 		calicoNodeClient:              calicoClient.Nodes(),
 		k8sNodeClient:                 k8sClientset.CoreV1().Nodes(),
 		bgpPeer:                       newBGPPeer(calicoClient),
 		kubeNodes:                     make(map[types.UID]*corev1.Node),
+		calicoNodes:                   make(map[types.UID]*apiv3.Node),
+		bgpPeers:                      make(map[*apiv3.BGPPeer]interface{}),
 		routeReflectorsUnderOperation: make(map[types.UID]bool),
 	}
+	ctrl.updateConfiguration()
 	ctrl.initSyncers(calicoClient, k8sClientset)
+
 	return ctrl
 }

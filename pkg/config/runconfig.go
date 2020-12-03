@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/libcalico-go/lib/watch"
 
 	log "github.com/sirupsen/logrus"
@@ -83,7 +84,7 @@ type ControllersConfig struct {
 	WorkloadEndpoint *GenericControllerConfig
 	ServiceAccount   *GenericControllerConfig
 	Namespace        *GenericControllerConfig
-	RouteReflector   *GenericControllerConfig
+	RouteReflector   *RouteReflectorControllerConfig
 }
 
 type GenericControllerConfig struct {
@@ -98,6 +99,20 @@ type NodeControllerConfig struct {
 	// Should the Node controller delete Calico nodes?  Generally, this is
 	// true for etcdv3 datastores.
 	DeleteNodes bool
+}
+
+type RouteReflectorControllerConfig struct {
+	DatastoreType    apiconfig.DatastoreType
+	ReconcilerPeriod time.Duration
+
+	ClusterID                *string
+	Min                      *int
+	Max                      *int
+	Ratio                    *float32
+	RouteReflectorLabelKey   *string
+	RouteReflectorLabelValue *string
+	ZoneLabel                *string
+	IncompatibleLabels       *string
 }
 
 type RunConfigController struct {
@@ -338,6 +353,34 @@ func mergeConfig(envVars map[string]string, envCfg Config, apiCfg v3.KubeControl
 	if rc.Namespace != nil {
 		rc.Namespace.NumberOfWorkers = envCfg.ProfileWorkers
 	}
+	if rc.RouteReflector != nil {
+		var dsType apiconfig.DatastoreType
+		switch envCfg.DatastoreType {
+		case string(apiconfig.Kubernetes):
+			dsType = apiconfig.Kubernetes
+		case string(apiconfig.EtcdV3):
+			dsType = apiconfig.EtcdV3
+		}
+		rc.RouteReflector.DatastoreType = dsType
+
+		// TODO find a better way to map
+		rrAPICfg := apiCfg.Controllers.RouteReflector
+		if rrAPICfg != nil {
+			if rrAPICfg.ReconcilerPeriod != nil {
+				rc.RouteReflector.ReconcilerPeriod = rrAPICfg.ReconcilerPeriod.Duration
+			} else {
+				rc.RouteReflector.ReconcilerPeriod = v1.Duration{Duration: time.Minute * 5}.Duration
+			}
+			rc.RouteReflector.ClusterID = rrAPICfg.ClusterID
+			rc.RouteReflector.Min = rrAPICfg.Min
+			rc.RouteReflector.Max = rrAPICfg.Max
+			rc.RouteReflector.Ratio = rrAPICfg.Ratio
+			rc.RouteReflector.RouteReflectorLabelKey = rrAPICfg.RouteReflectorLabelKey
+			rc.RouteReflector.RouteReflectorLabelValue = rrAPICfg.RouteReflectorLabelValue
+			rc.RouteReflector.ZoneLabel = rrAPICfg.ZoneLabel
+			rc.RouteReflector.IncompatibleLabels = rrAPICfg.IncompatibleLabels
+		}
+	}
 
 	return rCfg, status
 }
@@ -515,7 +558,7 @@ func mergeEnabledControllers(envVars map[string]string, status *v3.KubeControlle
 				rc.ServiceAccount = &GenericControllerConfig{}
 				sc.ServiceAccount = &v3.ServiceAccountControllerConfig{}
 			case "routereflector":
-				rc.RouteReflector = &GenericControllerConfig{}
+				rc.RouteReflector = &RouteReflectorControllerConfig{}
 				sc.RouteReflector = &v3.RouteReflectorControllerConfig{}
 			case "flannelmigration":
 				log.WithField(EnvEnabledControllers, v).Fatal("cannot run flannelmigration with other controllers")

@@ -62,14 +62,15 @@ var notReadyTaints = map[string]bool{
 }
 
 type ctrl struct {
-	isEnabled   bool
 	updateMutex sync.Mutex
+
+	dsType apiconfig.DatastoreType
 
 	calicoNodeClient client.NodeInterface
 	k8sNodeClient    k8sNodeClient
 
 	configSyncer bapi.Syncer
-	config       *apiv3.RouteReflectorControllerConfig
+	config       apiv3.RouteReflectorControllerConfig
 
 	kubeNodeInformer cache.Controller
 	kubeNodes        map[types.UID]*corev1.Node
@@ -168,17 +169,13 @@ func (c *ctrl) updateConfiguration() {
 
 	c.topology = topologies.NewMultiTopology(topologyConfig)
 
-	dsType := string(apiconfig.EtcdV3)
-	if c.config.DatastoreType != nil {
-		dsType = *c.config.DatastoreType
-	}
-	switch dsType {
-	case string(apiconfig.Kubernetes):
+	switch c.dsType {
+	case apiconfig.Kubernetes:
 		c.datastore = datastores.NewKddDatastore(c.topology)
-	case string(apiconfig.EtcdV3):
+	case apiconfig.EtcdV3:
 		c.datastore = datastores.NewEtcdDatastore(c.topology, c.calicoNodeClient)
 	default:
-		panic(fmt.Errorf("Unsupported Data Store %s", dsType))
+		panic(fmt.Errorf("Unsupported Data Store %s", string(c.dsType)))
 	}
 
 	c.incompatibleLabels = map[string]*string{}
