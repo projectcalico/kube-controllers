@@ -139,7 +139,7 @@ func (c *ctrl) updateNodeLabels(affectedNodes map[*corev1.Node]bool) error {
 
 func (c *ctrl) updateBGPTopology(kubeNode *corev1.Node, affectedNodes map[*corev1.Node]bool) error {
 	bgpPeers := []*apiv3.BGPPeer{}
-	for p := range c.bgpPeers {
+	for _, p := range c.bgpPeers {
 		bgpPeers = append(bgpPeers, p)
 	}
 

@@ -76,10 +76,10 @@ type ctrl struct {
 	kubeNodes        map[types.UID]*corev1.Node
 
 	calicoNodeSyncer bapi.Syncer
-	calicoNodes      map[types.UID]*apiv3.Node
+	calicoNodes      map[string]*apiv3.Node
 
 	bgpPeerSyncer bapi.Syncer
-	bgpPeers      map[*apiv3.BGPPeer]interface{}
+	bgpPeers      map[string]*apiv3.BGPPeer
 	bgpPeer       bgpPeer
 
 	routeReflectorsUnderOperation map[types.UID]bool

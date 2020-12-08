@@ -43,8 +43,8 @@ func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.C
 		k8sNodeClient:                 k8sClientset.CoreV1().Nodes(),
 		bgpPeer:                       newBGPPeer(calicoClient),
 		kubeNodes:                     make(map[types.UID]*corev1.Node),
-		calicoNodes:                   make(map[types.UID]*apiv3.Node),
-		bgpPeers:                      make(map[*apiv3.BGPPeer]interface{}),
+		calicoNodes:                   make(map[string]*apiv3.Node),
+		bgpPeers:                      make(map[string]*apiv3.BGPPeer),
 		routeReflectorsUnderOperation: make(map[types.UID]bool),
 	}
 	ctrl.updateConfiguration()

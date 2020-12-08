@@ -17,7 +17,8 @@ package routereflector
 import (
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
-	log "github.com/sirupsen/logrus"
+	"github.com/projectcalico/libcalico-go/lib/backend/model"
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -33,14 +34,14 @@ func (c *configSyncer) OnUpdates(updates []bapi.Update) {
 	defer c.ctrl.updateMutex.Unlock()
 
 	// Update local cache.
-	log.Debug("Controller config syncer received updates: %#v", updates)
+	logrus.Debug("Controller config syncer received updates: %#v", updates)
 	for _, upd := range updates {
 		switch upd.UpdateType {
 		case bapi.UpdateTypeKVNew:
-			log.Debug("New Controller config")
+			logrus.Debug("New Controller config")
 			fallthrough
-		case bapi.UpdateTypeKVUpdated, bapi.UpdateTypeKVUnknown:
-			log.Debug("Controller config updated")
+		case bapi.UpdateTypeKVUpdated:
+			logrus.Debug("Controller config updated")
 			config := upd.KVPair.Value.(*apiv3.KubeControllersConfiguration)
 			rrConfig := config.Spec.Controllers.RouteReflector
 			// TODO find a better way to map
@@ -56,10 +57,10 @@ func (c *configSyncer) OnUpdates(updates []bapi.Update) {
 				c.ctrl.updateConfiguration()
 			}
 		default:
-			log.Infof("Controller config unhandled update type %d", upd.UpdateType)
+			logrus.Infof("Controller config unhandled update type %d", upd.UpdateType)
 		}
 	}
-	log.Debug("RouteReflector config: %#v", c.ctrl.config)
+	logrus.Debug("RouteReflector config: %#v", c.ctrl.config)
 }
 
 type calicoNodeSyncer struct {
@@ -74,28 +75,31 @@ func (c *calicoNodeSyncer) OnUpdates(updates []bapi.Update) {
 	defer c.ctrl.updateMutex.Unlock()
 
 	// Update local cache.
-	log.Debug("RR Calico node syncer received updates: %#v", updates)
+	logrus.Debug("RR Calico node syncer received updates: %#v", updates)
 	for _, upd := range updates {
 		switch upd.UpdateType {
 		case bapi.UpdateTypeKVNew:
-			log.Debug("New Calico node")
+			logrus.Debug("New Calico node")
 			fallthrough
 		case bapi.UpdateTypeKVUpdated, bapi.UpdateTypeKVUnknown:
-			log.Debug("Calico node updated")
+			logrus.Debug("Calico node updated")
 			// TODO: For some reason, syncer doesn't give revision on the KVPair.
 			// So, we need to set it here.
 			n := upd.KVPair.Value.(*apiv3.Node)
 			n.ResourceVersion = upd.Revision
-			c.calicoNodes[n.GetUID()] = n
+			c.calicoNodes[n.GetName()] = n
 		case bapi.UpdateTypeKVDeleted:
-			log.Debug("Calico node deleted")
-			n := upd.KVPair.Value.(*apiv3.Node)
-			delete(c.calicoNodes, n.GetUID())
+			if upd.KVPair.Value != nil {
+				logrus.Warnf("KVPair value should be nil for Deleted UpdataType")
+			}
+			logrus.Debug("Calico node deleted")
+			name := upd.KVPair.Key.(model.ResourceKey).Name
+			delete(c.calicoNodes, name)
 		default:
-			log.Errorf("Calico node unhandled update type %d", upd.UpdateType)
+			logrus.Errorf("Calico node unhandled update type %d", upd.UpdateType)
 		}
 	}
-	log.Debug("Calico node cache: %#v", c.calicoNodes)
+	logrus.Debug("Calico node cache: %#v", c.calicoNodes)
 }
 
 type bgpPeerSyncer struct {
@@ -110,45 +114,48 @@ func (c *bgpPeerSyncer) OnUpdates(updates []bapi.Update) {
 	defer c.ctrl.updateMutex.Unlock()
 
 	// Update local cache.
-	log.Debug("RR BGP peer syncer received updates: %#v", updates)
+	logrus.Debug("RR BGP peer syncer received updates: %#v", updates)
 	for _, upd := range updates {
 		switch upd.UpdateType {
 		case bapi.UpdateTypeKVNew:
-			log.Debug("New BGP peer")
+			logrus.Debug("New BGP peer")
 			fallthrough
 		case bapi.UpdateTypeKVUpdated, bapi.UpdateTypeKVUnknown:
-			log.Debug("BGP peer updated")
+			logrus.Debug("BGP peer updated")
 			// TODO: For some reason, syncer doesn't give revision on the KVPair.
 			// So, we need to set it here.
 			p := upd.KVPair.Value.(*apiv3.BGPPeer)
 			p.ResourceVersion = upd.Revision
-			c.bgpPeers[p] = true
+			c.bgpPeers[p.GetName()] = p
 		case bapi.UpdateTypeKVDeleted:
-			log.Debug("BGP peer deleted")
-			p := upd.KVPair.Value.(*apiv3.BGPPeer)
-			delete(c.bgpPeers, p)
+			if upd.KVPair.Value != nil {
+				logrus.Warnf("KVPair value should be nil for Deleted UpdataType")
+			}
+			logrus.Debug("BGP peer deleted")
+			name := upd.KVPair.Key.(model.ResourceKey).Name
+			delete(c.bgpPeers, name)
 		default:
-			log.Errorf("BGP peer unhandled update type %d", upd.UpdateType)
+			logrus.Errorf("BGP peer unhandled update type %d", upd.UpdateType)
 		}
 	}
-	log.Debug("BGP peer cache: %#v", c.calicoNodes)
+	logrus.Debug("BGP peer cache: %#v", c.calicoNodes)
 }
 
 func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
 	c.updateMutex.Lock()
 	defer c.updateMutex.Unlock()
 
-	log.Debug("Kube node updated")
+	logrus.Debug("Kube node updated")
 	newKubeNode, ok := newObj.(*corev1.Node)
 	if !ok {
-		log.Errorf("Given resource type can't handle %v", newObj)
+		logrus.Errorf("Given resource type can't handle %v", newObj)
 		return
 	}
 
 	c.kubeNodes[newKubeNode.GetUID()] = newKubeNode
 
 	if err := c.update(newKubeNode); err != nil {
-		log.Errorf("Unable to update Kubernetes node %s because of %s", newKubeNode.GetName(), err)
+		logrus.Errorf("Unable to update Kubernetes node %s because of %s", newKubeNode.GetName(), err)
 	}
 }
 
@@ -158,12 +165,12 @@ func (c *ctrl) OnKubeDelete(obj interface{}) {
 
 	kubeNode, ok := obj.(*corev1.Node)
 	if !ok {
-		log.Errorf("Given resource type can't handle %v", obj)
+		logrus.Errorf("Given resource type can't handle %v", obj)
 		return
 	}
 
 	if err := c.delete(kubeNode); err != nil {
-		log.Errorf("Unable to delete Kubernetes node %s because of %s", kubeNode.GetName(), err)
+		logrus.Errorf("Unable to delete Kubernetes node %s because of %s", kubeNode.GetName(), err)
 	}
 
 	delete(c.kubeNodes, kubeNode.GetUID())
