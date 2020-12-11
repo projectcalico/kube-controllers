@@ -106,7 +106,7 @@ func (c *ctrl) updateNodeLabels(affectedNodes map[*corev1.Node]bool) error {
 		for _, n := range status.Nodes {
 			n := c.kubeNodes[n.GetUID()]
 
-			if affectedNodes[n] {
+			if affected, ok := affectedNodes[n]; !affected || !ok {
 				continue
 			} else if status.ExpectedRRs == status.ActualRRs {
 				break

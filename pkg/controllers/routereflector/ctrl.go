@@ -15,6 +15,7 @@
 package routereflector
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -32,6 +33,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -140,6 +142,12 @@ func (c *ctrl) initSyncers(client client.Interface, k8sClientset *kubernetes.Cli
 		},
 	}
 	c.bgpPeerSyncer = watchersyncer.New(client.(accessor).Backend(), bgpPeerResources, &bgpPeerSyncer{c})
+
+	if kubeNodes, err := k8sClientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{}); err == nil {
+		for _, n := range kubeNodes.Items {
+			c.kubeNodes[n.GetUID()] = &n
+		}
+	}
 
 	// Create a Node watcher.
 	kubeNodeWatcher := cache.NewListWatchFromClient(k8sClientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())

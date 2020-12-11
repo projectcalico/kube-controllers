@@ -81,14 +81,14 @@ func (c *calicoNodeSyncer) OnUpdates(updates []bapi.Update) {
 		case bapi.UpdateTypeKVNew:
 			logrus.Debug("New Calico node")
 			fallthrough
-		case bapi.UpdateTypeKVUpdated, bapi.UpdateTypeKVUnknown:
+		case bapi.UpdateTypeKVUpdated:
 			logrus.Debug("Calico node updated")
 			// TODO: For some reason, syncer doesn't give revision on the KVPair.
 			// So, we need to set it here.
 			n := upd.KVPair.Value.(*apiv3.Node)
 			n.ResourceVersion = upd.Revision
 			c.calicoNodes[n.GetName()] = n
-		case bapi.UpdateTypeKVDeleted:
+		case bapi.UpdateTypeKVDeleted, bapi.UpdateTypeKVUnknown:
 			if upd.KVPair.Value != nil {
 				logrus.Warnf("KVPair value should be nil for Deleted UpdataType")
 			}
