@@ -16,8 +16,6 @@ package routereflector
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -66,13 +64,8 @@ var notReadyTaints = map[string]bool{
 type ctrl struct {
 	updateMutex sync.Mutex
 
-	dsType apiconfig.DatastoreType
-
 	calicoNodeClient client.NodeInterface
 	k8sNodeClient    k8sNodeClient
-
-	configSyncer bapi.Syncer
-	config       apiv3.RouteReflectorControllerConfig
 
 	kubeNodeInformer cache.Controller
 	kubeNodes        map[types.UID]*corev1.Node
@@ -92,9 +85,6 @@ type ctrl struct {
 }
 
 func (c *ctrl) Run(stopCh chan struct{}) {
-	// Start the configuration syncer
-	go c.configSyncer.Start()
-
 	if c.datastore.GetType() == apiconfig.EtcdV3 {
 		// Start the Calico node syncer.
 		go c.calicoNodeSyncer.Start()
@@ -118,16 +108,15 @@ func (c *ctrl) Run(stopCh chan struct{}) {
 }
 
 func (c *ctrl) initSyncers(client client.Interface, k8sClientset *kubernetes.Clientset) {
+	if kubeNodes, err := k8sClientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{}); err == nil {
+		for _, n := range kubeNodes.Items {
+			c.kubeNodes[n.GetUID()] = &n
+		}
+	}
+
 	type accessor interface {
 		Backend() bapi.Client
 	}
-
-	controllerConfigResources := []watchersyncer.ResourceType{
-		{
-			ListInterface: model.ResourceListOptions{Kind: apiv3.KindKubeControllersConfiguration},
-		},
-	}
-	c.configSyncer = watchersyncer.New(client.(accessor).Backend(), controllerConfigResources, &configSyncer{c})
 
 	calicoNodeResources := []watchersyncer.ResourceType{
 		{
@@ -143,12 +132,6 @@ func (c *ctrl) initSyncers(client client.Interface, k8sClientset *kubernetes.Cli
 	}
 	c.bgpPeerSyncer = watchersyncer.New(client.(accessor).Backend(), bgpPeerResources, &bgpPeerSyncer{c})
 
-	if kubeNodes, err := k8sClientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{}); err == nil {
-		for _, n := range kubeNodes.Items {
-			c.kubeNodes[n.GetUID()] = &n
-		}
-	}
-
 	// Create a Node watcher.
 	kubeNodeWatcher := cache.NewListWatchFromClient(k8sClientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())
 
@@ -161,40 +144,4 @@ func (c *ctrl) initSyncers(client client.Interface, k8sClientset *kubernetes.Cli
 	// Informer handles managing the watch and signals us when nodes are deleted.
 	// also syncs up labels between k8s/calico node objects
 	_, c.kubeNodeInformer = cache.NewIndexerInformer(kubeNodeWatcher, &v1.Node{}, 0, handlers, cache.Indexers{})
-}
-
-func (c *ctrl) updateConfiguration() {
-	topologyConfig := topologies.Config{
-		NodeLabelKey:   orDefaultString(c.config.RouteReflectorLabelKey, defaultRouteReflectorLabelKey),
-		NodeLabelValue: orDefaultString(c.config.RouteReflectorLabelValue, defaultRouteReflectorLabelValue),
-		ZoneLabel:      orDefaultString(c.config.ZoneLabel, defaultZoneLabel),
-		ClusterID:      orDefaultString(c.config.ClusterID, defaultClusterID),
-		Min:            orDefaultInt(c.config.Min, defaultRouteReflectorMin),
-		Max:            orDefaultInt(c.config.Max, defaultRouteReflectorMax),
-		Ration:         float64(orDefaultFloat(c.config.Ratio, defaultRouteReflectorRatio)),
-	}
-	log.Infof("Topology config: %v", topologyConfig)
-
-	c.topology = topologies.NewMultiTopology(topologyConfig)
-
-	switch c.dsType {
-	case apiconfig.Kubernetes:
-		c.datastore = datastores.NewKddDatastore(c.topology)
-	case apiconfig.EtcdV3:
-		c.datastore = datastores.NewEtcdDatastore(c.topology, c.calicoNodeClient)
-	default:
-		panic(fmt.Errorf("Unsupported Data Store %s", string(c.dsType)))
-	}
-
-	c.incompatibleLabels = map[string]*string{}
-	if c.config.IncompatibleLabels != nil {
-		for _, l := range strings.Split(*c.config.IncompatibleLabels, ",") {
-			key, value := getKeyValue(strings.Trim(l, " "))
-			if strings.Contains(l, "=") {
-				c.incompatibleLabels[key] = &value
-			} else {
-				c.incompatibleLabels[key] = nil
-			}
-		}
-	}
 }

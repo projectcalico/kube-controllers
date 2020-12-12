@@ -22,47 +22,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-type configSyncer struct {
-	*ctrl
-}
-
-func (c *configSyncer) OnStatusUpdated(status bapi.SyncStatus) {
-}
-
-func (c *configSyncer) OnUpdates(updates []bapi.Update) {
-	c.ctrl.updateMutex.Lock()
-	defer c.ctrl.updateMutex.Unlock()
-
-	// Update local cache.
-	logrus.Debug("Controller config syncer received updates: %#v", updates)
-	for _, upd := range updates {
-		switch upd.UpdateType {
-		case bapi.UpdateTypeKVNew:
-			logrus.Debug("New Controller config")
-			fallthrough
-		case bapi.UpdateTypeKVUpdated:
-			logrus.Debug("Controller config updated")
-			config := upd.KVPair.Value.(*apiv3.KubeControllersConfiguration)
-			rrConfig := config.Spec.Controllers.RouteReflector
-			// TODO find a better way to map
-			if rrConfig != nil {
-				c.ctrl.config.ClusterID = rrConfig.ClusterID
-				c.ctrl.config.Min = rrConfig.Min
-				c.ctrl.config.Max = rrConfig.Max
-				c.ctrl.config.Ratio = rrConfig.Ratio
-				c.ctrl.config.RouteReflectorLabelKey = rrConfig.RouteReflectorLabelKey
-				c.ctrl.config.RouteReflectorLabelValue = rrConfig.RouteReflectorLabelValue
-				c.ctrl.config.ZoneLabel = rrConfig.ZoneLabel
-				c.ctrl.config.IncompatibleLabels = rrConfig.IncompatibleLabels
-				c.ctrl.updateConfiguration()
-			}
-		default:
-			logrus.Infof("Controller config unhandled update type %d", upd.UpdateType)
-		}
-	}
-	logrus.Debug("RouteReflector config: %#v", c.ctrl.config)
-}
-
 type calicoNodeSyncer struct {
 	*ctrl
 }
@@ -120,14 +79,14 @@ func (c *bgpPeerSyncer) OnUpdates(updates []bapi.Update) {
 		case bapi.UpdateTypeKVNew:
 			logrus.Debug("New BGP peer")
 			fallthrough
-		case bapi.UpdateTypeKVUpdated, bapi.UpdateTypeKVUnknown:
+		case bapi.UpdateTypeKVUpdated:
 			logrus.Debug("BGP peer updated")
 			// TODO: For some reason, syncer doesn't give revision on the KVPair.
 			// So, we need to set it here.
 			p := upd.KVPair.Value.(*apiv3.BGPPeer)
 			p.ResourceVersion = upd.Revision
 			c.bgpPeers[p.GetName()] = p
-		case bapi.UpdateTypeKVDeleted:
+		case bapi.UpdateTypeKVDeleted, bapi.UpdateTypeKVUnknown:
 			if upd.KVPair.Value != nil {
 				logrus.Warnf("KVPair value should be nil for Deleted UpdataType")
 			}

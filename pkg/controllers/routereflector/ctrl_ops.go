@@ -16,7 +16,6 @@ package routereflector
 
 import (
 	"context"
-	"time"
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	log "github.com/sirupsen/logrus"
@@ -106,7 +105,7 @@ func (c *ctrl) updateNodeLabels(affectedNodes map[*corev1.Node]bool) error {
 		for _, n := range status.Nodes {
 			n := c.kubeNodes[n.GetUID()]
 
-			if affected, ok := affectedNodes[n]; !affected || !ok {
+			if !affectedNodes[n] {
 				continue
 			} else if status.ExpectedRRs == status.ActualRRs {
 				break
@@ -156,12 +155,6 @@ func (c *ctrl) updateBGPTopology(kubeNode *corev1.Node, affectedNodes map[*corev
 			log.Errorf("Unable to save BGPPeer because of %s", err.Error())
 			return err
 		}
-	}
-
-	// Give some time to Calico to establish new connections before deleting old ones
-	if len(toRefresh) > 0 {
-		time.Sleep(2)
-		return c.update(kubeNode)
 	}
 
 	for _, p := range toRemove {

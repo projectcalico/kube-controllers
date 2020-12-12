@@ -16,12 +16,18 @@ package routereflector
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/projectcalico/kube-controllers/pkg/config"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/controller"
+	"github.com/projectcalico/kube-controllers/pkg/controllers/routereflector/datastores"
+	"github.com/projectcalico/kube-controllers/pkg/controllers/routereflector/topologies"
+	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
+	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,7 +44,6 @@ type k8sNodeClient interface {
 func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.Clientset, calicoClient client.Interface, cfg config.RouteReflectorControllerConfig) controller.Controller {
 	ctrl := &ctrl{
 		updateMutex:                   sync.Mutex{},
-		dsType:                        cfg.DatastoreType,
 		calicoNodeClient:              calicoClient.Nodes(),
 		k8sNodeClient:                 k8sClientset.CoreV1().Nodes(),
 		bgpPeer:                       newBGPPeer(calicoClient),
@@ -47,7 +52,41 @@ func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.C
 		bgpPeers:                      make(map[string]*apiv3.BGPPeer),
 		routeReflectorsUnderOperation: make(map[types.UID]bool),
 	}
-	ctrl.updateConfiguration()
+
+	topologyConfig := topologies.Config{
+		NodeLabelKey:   orDefaultString(cfg.RouteReflectorLabelKey, defaultRouteReflectorLabelKey),
+		NodeLabelValue: orDefaultString(cfg.RouteReflectorLabelValue, defaultRouteReflectorLabelValue),
+		ZoneLabel:      orDefaultString(cfg.ZoneLabel, defaultZoneLabel),
+		ClusterID:      orDefaultString(cfg.ClusterID, defaultClusterID),
+		Min:            orDefaultInt(cfg.Min, defaultRouteReflectorMin),
+		Max:            orDefaultInt(cfg.Max, defaultRouteReflectorMax),
+		Ration:         float64(orDefaultFloat(cfg.Ratio, defaultRouteReflectorRatio)),
+	}
+	log.Infof("Topology config: %v", topologyConfig)
+
+	ctrl.topology = topologies.NewMultiTopology(topologyConfig)
+
+	switch cfg.DatastoreType {
+	case apiconfig.Kubernetes:
+		ctrl.datastore = datastores.NewKddDatastore(ctrl.topology)
+	case apiconfig.EtcdV3:
+		ctrl.datastore = datastores.NewEtcdDatastore(ctrl.topology, ctrl.calicoNodeClient)
+	default:
+		panic(fmt.Errorf("Unsupported Data Store %s", string(cfg.DatastoreType)))
+	}
+
+	ctrl.incompatibleLabels = map[string]*string{}
+	if cfg.IncompatibleLabels != nil {
+		for _, l := range strings.Split(*cfg.IncompatibleLabels, ",") {
+			key, value := getKeyValue(strings.Trim(l, " "))
+			if strings.Contains(l, "=") {
+				ctrl.incompatibleLabels[key] = &value
+			} else {
+				ctrl.incompatibleLabels[key] = nil
+			}
+		}
+	}
+
 	ctrl.initSyncers(calicoClient, k8sClientset)
 
 	return ctrl
