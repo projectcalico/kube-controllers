@@ -128,9 +128,6 @@ func (t *MultiTopology) GenerateBGPPeers(affectedNodes map[*corev1.Node]bool, ex
 		toKeep[rrConfig.GetName()] = true
 	}
 
-	// TODO make it configurable
-	peers := int(math.Min(float64(len(routeReflectors)), 3))
-
 	rrIndex := -1
 	rrIndexPerZone := map[string]int{}
 	zones := []string{}
@@ -179,6 +176,9 @@ func (t *MultiTopology) GenerateBGPPeers(affectedNodes map[*corev1.Node]bool, ex
 				}
 			}
 		}
+
+		// TODO make it configurable
+		peers := int(math.Min(float64(len(routeReflectors)), 3))
 
 		// Selecting the remaning RRs sequentially
 		for len(routeReflectorsForNode) < peers {

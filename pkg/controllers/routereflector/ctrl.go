@@ -110,7 +110,8 @@ func (c *ctrl) Run(stopCh chan struct{}) {
 func (c *ctrl) initSyncers(client client.Interface, k8sClientset *kubernetes.Clientset) {
 	if kubeNodes, err := k8sClientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{}); err == nil {
 		for _, n := range kubeNodes.Items {
-			c.kubeNodes[n.GetUID()] = &n
+			kubeNode := n
+			c.kubeNodes[n.GetUID()] = &kubeNode
 		}
 	}
 

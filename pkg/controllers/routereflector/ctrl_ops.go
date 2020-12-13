@@ -200,7 +200,7 @@ func (c *ctrl) updateRRStatus(kubeNode *corev1.Node, diff int) (bool, error) {
 			log.Errorf("Unable to delete RR status %s because of %s", kubeNode.GetName(), err.Error())
 			return false, err
 		}
-		log.Infof("Removing route reflector label to %s", kubeNode.GetName())
+		log.Infof("Removing route reflector label from %s", kubeNode.GetName())
 	} else {
 		if err := c.datastore.AddRRStatus(kubeNode, c.findCalicoNode(kubeNode)); err != nil {
 			log.Errorf("Unable to add RR status %s because of %s", kubeNode.GetName(), err.Error())
