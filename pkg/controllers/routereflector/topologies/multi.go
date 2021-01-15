@@ -79,7 +79,6 @@ func (t *MultiTopology) GetRouteReflectorStatuses(affectedNodes map[*corev1.Node
 	for _, zoneNodes := range perZone {
 		status := t.single.GetRouteReflectorStatuses(zoneNodes)[0]
 
-		// TODO On this way it collects info in single and multi too twice
 		status.ActualRRs = countActiveRouteReflectors(t.IsRouteReflector, zoneNodes)
 		status.ExpectedRRs = expRRsPerZone
 
@@ -177,8 +176,7 @@ func (t *MultiTopology) GenerateBGPPeers(affectedNodes map[*corev1.Node]bool, ex
 			}
 		}
 
-		// TODO make it configurable
-		peers := int(math.Min(float64(len(routeReflectors)), 3))
+		peers := int(math.Min(float64(len(routeReflectors)), float64(t.Config.ReflectorsPerNode)))
 
 		// Selecting the remaning RRs sequentially
 		for len(routeReflectorsForNode) < peers {
@@ -194,8 +192,7 @@ func (t *MultiTopology) GenerateBGPPeers(affectedNodes map[*corev1.Node]bool, ex
 			}
 		}
 
-		// TODO make configurable
-		nodeSelector := fmt.Sprintf("kubernetes.io/hostname=='%s'", n.GetLabels()["kubernetes.io/hostname"])
+		nodeSelector := fmt.Sprintf("%s=='%s'", t.Config.HostnameLabel, n.GetLabels()[t.Config.HostnameLabel])
 
 		for _, rr := range routeReflectorsForNode {
 			rrID := getRouteReflectorID(string(rr.GetUID()))

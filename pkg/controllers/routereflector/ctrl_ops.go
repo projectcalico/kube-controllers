@@ -18,6 +18,7 @@ import (
 	"context"
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
+	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -160,8 +161,11 @@ func (c *ctrl) updateBGPTopology(kubeNode *corev1.Node, affectedNodes map[*corev
 	for _, p := range toRemove {
 		log.Debugf("Removing BGPPeer: %s", p.GetName())
 		if err := c.bgpPeer.remove(p); err != nil {
-			log.Errorf("Unable to remove BGPPeer because of %s", err.Error())
-			return err
+			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); !ok {
+				log.Errorf("Unable to remove BGPPeer because of %s", err.Error())
+				return err
+			}
+			log.Debugf("Unable to remove BGPPeer because of %s", err.Error())
 		}
 	}
 
@@ -234,7 +238,7 @@ func (c *ctrl) collectNodeInfo(filter func(*corev1.Node) bool) (filtered map[*co
 
 func (c *ctrl) findCalicoNode(kubeNode *corev1.Node) *apiv3.Node {
 	for _, cn := range c.calicoNodes {
-		if hostname, ok := cn.GetLabels()["kubernetes.io/hostname"]; ok && hostname == kubeNode.GetLabels()["kubernetes.io/hostname"] {
+		if hostname, ok := cn.GetLabels()[c.hostnameLabel]; ok && hostname == kubeNode.GetLabels()[c.hostnameLabel] {
 			log.Debugf("Calico node found %s for %s-%s", cn.GetName(), kubeNode.GetNamespace(), kubeNode.GetName())
 			return cn
 		}

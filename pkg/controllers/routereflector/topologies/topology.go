@@ -21,7 +21,6 @@ import (
 )
 
 const (
-	// TODO Make it configurable
 	DefaultRouteReflectorMeshName   = "rrs-to-rrs"
 	DefaultRouteReflectorClientName = "peer-to-rrs-%d"
 )
@@ -43,13 +42,15 @@ type Topology interface {
 }
 
 type Config struct {
-	NodeLabelKey   string
-	NodeLabelValue string
-	ZoneLabel      string
-	ClusterID      string
-	Min            int
-	Max            int
-	Ration         float64
+	NodeLabelKey      string
+	NodeLabelValue    string
+	ZoneLabel         string
+	HostnameLabel     string
+	ClusterID         string
+	Min               int
+	Max               int
+	Ration            float64
+	ReflectorsPerNode int
 }
 
 func generateBGPPeerStub(name string) *apiv3.BGPPeer {

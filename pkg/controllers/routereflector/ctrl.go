@@ -39,15 +39,18 @@ import (
 )
 
 const (
+	defaultTopologyType             = "multi"
 	defaultClusterID                = "224.0.0.0"
 	defaultRouteReflectorMin        = 3
 	defaultRouteReflectorMax        = 10
+	defaultReflectorsPerNode        = 3
 	defaultRouteReflectorRatio      = 0.005
 	defaultRouteReflectorRatioMin   = 0.001
 	defaultRouteReflectorRatioMax   = 0.05
 	defaultRouteReflectorLabelKey   = "calico-route-reflector"
 	defaultRouteReflectorLabelValue = ""
 	defaultZoneLabel                = "failure-domain.beta.kubernetes.io/zone"
+	defaultHostnameLabel            = "kubernetes.io/hostname"
 )
 
 var notReadyTaints = map[string]bool{
@@ -62,7 +65,9 @@ var notReadyTaints = map[string]bool{
 }
 
 type ctrl struct {
-	updateMutex sync.Mutex
+	updateMutex     sync.Mutex
+	syncWaitGroup   *sync.WaitGroup
+	waitForSyncOnce sync.Once
 
 	calicoNodeClient client.NodeInterface
 	k8sNodeClient    k8sNodeClient
@@ -81,6 +86,7 @@ type ctrl struct {
 
 	topology           topologies.Topology
 	datastore          datastores.Datastore
+	hostnameLabel      string
 	incompatibleLabels map[string]*string
 }
 
@@ -95,19 +101,19 @@ func (c *ctrl) Run(stopCh chan struct{}) {
 
 	// Wait till k8s cache is synced
 	go c.kubeNodeInformer.Run(stopCh)
-	log.Debug("Waiting to sync with Kubernetes API (Nodes)")
+	log.Debug("Waiting to sync with Kube API (Nodes)")
 	for !c.kubeNodeInformer.HasSynced() {
 		time.Sleep(100 * time.Millisecond)
 	}
-	log.Debug("Finished syncing with Kubernetes API (Nodes)")
+	log.Debug("Finished syncing with Kube API (Nodes)")
 
-	log.Info("Node controller is now running")
+	log.Info("Route reflector controller is now running")
 
 	<-stopCh
 	log.Info("Stopping route reflector controller")
 }
 
-func (c *ctrl) initSyncers(client client.Interface, k8sClientset *kubernetes.Clientset) {
+func (c *ctrl) initSyncers(datastore apiconfig.DatastoreType, client client.Interface, k8sClientset *kubernetes.Clientset) {
 	if kubeNodes, err := k8sClientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{}); err == nil {
 		for _, n := range kubeNodes.Items {
 			kubeNode := n
@@ -119,12 +125,15 @@ func (c *ctrl) initSyncers(client client.Interface, k8sClientset *kubernetes.Cli
 		Backend() bapi.Client
 	}
 
-	calicoNodeResources := []watchersyncer.ResourceType{
-		{
-			ListInterface: model.ResourceListOptions{Kind: apiv3.KindNode},
-		},
+	if datastore == apiconfig.EtcdV3 {
+		calicoNodeResources := []watchersyncer.ResourceType{
+			{
+				ListInterface: model.ResourceListOptions{Kind: apiv3.KindNode},
+			},
+		}
+		c.calicoNodeSyncer = watchersyncer.New(client.(accessor).Backend(), calicoNodeResources, &calicoNodeSyncer{c})
+		c.syncWaitGroup.Add(1)
 	}
-	c.calicoNodeSyncer = watchersyncer.New(client.(accessor).Backend(), calicoNodeResources, &calicoNodeSyncer{c})
 
 	bgpPeerResources := []watchersyncer.ResourceType{
 		{
@@ -132,6 +141,7 @@ func (c *ctrl) initSyncers(client client.Interface, k8sClientset *kubernetes.Cli
 		},
 	}
 	c.bgpPeerSyncer = watchersyncer.New(client.(accessor).Backend(), bgpPeerResources, &bgpPeerSyncer{c})
+	c.syncWaitGroup.Add(1)
 
 	// Create a Node watcher.
 	kubeNodeWatcher := cache.NewListWatchFromClient(k8sClientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())

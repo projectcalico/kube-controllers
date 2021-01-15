@@ -42,8 +42,12 @@ type k8sNodeClient interface {
 }
 
 func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.Clientset, calicoClient client.Interface, cfg config.RouteReflectorControllerConfig) controller.Controller {
+	hostnameLabel := orDefaultString(cfg.HostnameLabel, defaultHostnameLabel)
+
 	ctrl := &ctrl{
 		updateMutex:                   sync.Mutex{},
+		syncWaitGroup:                 &sync.WaitGroup{},
+		waitForSyncOnce:               sync.Once{},
 		calicoNodeClient:              calicoClient.Nodes(),
 		k8sNodeClient:                 k8sClientset.CoreV1().Nodes(),
 		bgpPeer:                       newBGPPeer(calicoClient),
@@ -51,20 +55,30 @@ func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.C
 		calicoNodes:                   make(map[string]*apiv3.Node),
 		bgpPeers:                      make(map[string]*apiv3.BGPPeer),
 		routeReflectorsUnderOperation: make(map[types.UID]bool),
+		hostnameLabel:                 hostnameLabel,
 	}
 
 	topologyConfig := topologies.Config{
-		NodeLabelKey:   orDefaultString(cfg.RouteReflectorLabelKey, defaultRouteReflectorLabelKey),
-		NodeLabelValue: orDefaultString(cfg.RouteReflectorLabelValue, defaultRouteReflectorLabelValue),
-		ZoneLabel:      orDefaultString(cfg.ZoneLabel, defaultZoneLabel),
-		ClusterID:      orDefaultString(cfg.ClusterID, defaultClusterID),
-		Min:            orDefaultInt(cfg.Min, defaultRouteReflectorMin),
-		Max:            orDefaultInt(cfg.Max, defaultRouteReflectorMax),
-		Ration:         float64(orDefaultFloat(cfg.Ratio, defaultRouteReflectorRatio)),
+		NodeLabelKey:      orDefaultString(cfg.RouteReflectorLabelKey, defaultRouteReflectorLabelKey),
+		NodeLabelValue:    orDefaultString(cfg.RouteReflectorLabelValue, defaultRouteReflectorLabelValue),
+		ZoneLabel:         orDefaultString(cfg.ZoneLabel, defaultZoneLabel),
+		HostnameLabel:     hostnameLabel,
+		ClusterID:         orDefaultString(cfg.ClusterID, defaultClusterID),
+		Min:               orDefaultInt(cfg.Min, defaultRouteReflectorMin),
+		Max:               orDefaultInt(cfg.Max, defaultRouteReflectorMax),
+		Ration:            float64(orDefaultFloat(cfg.Ratio, defaultRouteReflectorRatio)),
+		ReflectorsPerNode: orDefaultInt(cfg.RouteReflectorsPerNode, defaultReflectorsPerNode),
 	}
 	log.Infof("Topology config: %v", topologyConfig)
 
-	ctrl.topology = topologies.NewMultiTopology(topologyConfig)
+	switch orDefaultString(cfg.TopologyType, defaultTopologyType) {
+	case "multi":
+		ctrl.topology = topologies.NewMultiTopology(topologyConfig)
+	case "single":
+		ctrl.topology = topologies.NewSingleTopology(topologyConfig)
+	default:
+		panic(fmt.Errorf("Unsupported topology type %s", string(*cfg.TopologyType)))
+	}
 
 	switch cfg.DatastoreType {
 	case apiconfig.Kubernetes:
@@ -87,7 +101,7 @@ func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.C
 		}
 	}
 
-	ctrl.initSyncers(calicoClient, k8sClientset)
+	ctrl.initSyncers(cfg.DatastoreType, calicoClient, k8sClientset)
 
 	return ctrl
 }

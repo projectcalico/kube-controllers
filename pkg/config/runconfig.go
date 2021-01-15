@@ -105,13 +105,16 @@ type RouteReflectorControllerConfig struct {
 	DatastoreType    apiconfig.DatastoreType
 	ReconcilerPeriod time.Duration
 
+	TopologyType             *string
 	ClusterID                *string
 	Min                      *int
 	Max                      *int
 	Ratio                    *float32
+	RouteReflectorsPerNode   *int
 	RouteReflectorLabelKey   *string
 	RouteReflectorLabelValue *string
 	ZoneLabel                *string
+	HostnameLabel            *string
 	IncompatibleLabels       *string
 }
 
@@ -371,13 +374,16 @@ func mergeConfig(envVars map[string]string, envCfg Config, apiCfg v3.KubeControl
 			} else {
 				rc.RouteReflector.ReconcilerPeriod = v1.Duration{Duration: time.Minute * 5}.Duration
 			}
+			rc.RouteReflector.TopologyType = rrAPICfg.TopologyType
 			rc.RouteReflector.ClusterID = rrAPICfg.ClusterID
 			rc.RouteReflector.Min = rrAPICfg.Min
 			rc.RouteReflector.Max = rrAPICfg.Max
 			rc.RouteReflector.Ratio = rrAPICfg.Ratio
+			rc.RouteReflector.RouteReflectorsPerNode = rrAPICfg.RouteReflectorsPerNode
 			rc.RouteReflector.RouteReflectorLabelKey = rrAPICfg.RouteReflectorLabelKey
 			rc.RouteReflector.RouteReflectorLabelValue = rrAPICfg.RouteReflectorLabelValue
 			rc.RouteReflector.ZoneLabel = rrAPICfg.ZoneLabel
+			rc.RouteReflector.HostnameLabel = rrAPICfg.HostnameLabel
 			rc.RouteReflector.IncompatibleLabels = rrAPICfg.IncompatibleLabels
 		}
 	}

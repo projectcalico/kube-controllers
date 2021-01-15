@@ -27,6 +27,13 @@ type calicoNodeSyncer struct {
 }
 
 func (c *calicoNodeSyncer) OnStatusUpdated(status bapi.SyncStatus) {
+	logrus.Debugf("Route reflector controller Calico node syncer status updated: %s", status)
+
+	switch status {
+	case bapi.InSync:
+		logrus.Info("Route reflector controller Calico nodes are in sync")
+		c.ctrl.syncWaitGroup.Done()
+	}
 }
 
 func (c *calicoNodeSyncer) OnUpdates(updates []bapi.Update) {
@@ -66,6 +73,13 @@ type bgpPeerSyncer struct {
 }
 
 func (c *bgpPeerSyncer) OnStatusUpdated(status bapi.SyncStatus) {
+	logrus.Debugf("Route reflector controller BGP peer syncer status updated: %s", status)
+
+	switch status {
+	case bapi.InSync:
+		logrus.Info("Route reflector controller BGP peers are in sync")
+		c.ctrl.syncWaitGroup.Done()
+	}
 }
 
 func (c *bgpPeerSyncer) OnUpdates(updates []bapi.Update) {
@@ -97,14 +111,16 @@ func (c *bgpPeerSyncer) OnUpdates(updates []bapi.Update) {
 			logrus.Errorf("BGP peer unhandled update type %d", upd.UpdateType)
 		}
 	}
-	logrus.Debug("BGP peer cache: %#v", c.calicoNodes)
+	logrus.Debug("BGP peer cache: %#v", c.bgpPeers)
 }
 
 func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
+	c.waitForSyncOnce.Do(c.waitForSync)
+
 	c.updateMutex.Lock()
 	defer c.updateMutex.Unlock()
 
-	logrus.Debug("Kube node updated")
+	logrus.Debugf("Kube node updated %v", newObj)
 	newKubeNode, ok := newObj.(*corev1.Node)
 	if !ok {
 		logrus.Errorf("Given resource type can't handle %v", newObj)
@@ -114,14 +130,17 @@ func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
 	c.kubeNodes[newKubeNode.GetUID()] = newKubeNode
 
 	if err := c.update(newKubeNode); err != nil {
-		logrus.Errorf("Unable to update Kubernetes node %s because of %s", newKubeNode.GetName(), err)
+		logrus.Errorf("Unable to update Kube node %s because of %s", newKubeNode.GetName(), err)
 	}
 }
 
 func (c *ctrl) OnKubeDelete(obj interface{}) {
+	c.waitForSyncOnce.Do(c.waitForSync)
+
 	c.updateMutex.Lock()
 	defer c.updateMutex.Unlock()
 
+	logrus.Debugf("Kube node updated %v", obj)
 	kubeNode, ok := obj.(*corev1.Node)
 	if !ok {
 		logrus.Errorf("Given resource type can't handle %v", obj)
@@ -129,8 +148,14 @@ func (c *ctrl) OnKubeDelete(obj interface{}) {
 	}
 
 	if err := c.delete(kubeNode); err != nil {
-		logrus.Errorf("Unable to delete Kubernetes node %s because of %s", kubeNode.GetName(), err)
+		logrus.Errorf("Unable to delete Kube node %s because of %s", kubeNode.GetName(), err)
 	}
 
 	delete(c.kubeNodes, kubeNode.GetUID())
+}
+
+func (c *ctrl) waitForSync() {
+	logrus.Info("Waiting for sync to calcualte rote reflector topology")
+	c.syncWaitGroup.Wait()
+	logrus.Info("Sync done, time to calcualte rote reflector topology")
 }
