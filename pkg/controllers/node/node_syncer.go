@@ -133,29 +133,31 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 				c.nodemapLock.Unlock()
 				kick(c.blockUpdate)
 			case model.ResourceKey:
-				// For now, the only type of ResourceKeys we receive are nodes, because we only watch
-				// two resource kinds as part of the syncer. If we ever watch more, we may need to
-				// further subdivide this branch based on kind.
-
-				// Try to perform unmapping based on resource name (calico node name).
-				nodeName := upd.KVPair.Key.(model.ResourceKey).Name
-				for kn, cn := range c.nodemapper {
-					if cn == nodeName {
-						// Remove it from node map.
-						logrus.Debugf("Unmapping k8s node -> calico node. %s -> %s", kn, cn)
-						c.nodemapLock.Lock()
-						delete(c.nodemapper, kn)
-						c.nodemapLock.Unlock()
-						break
+				switch upd.KVPair.Key.(model.ResourceKey).Kind {
+				case apiv3.KindNode:
+					// Try to perform unmapping based on resource name (calico node name).
+					nodeName := upd.KVPair.Key.(model.ResourceKey).Name
+					for kn, cn := range c.nodemapper {
+						if cn == nodeName {
+							// Remove it from node map.
+							logrus.Debugf("Unmapping k8s node -> calico node. %s -> %s", kn, cn)
+							c.nodemapLock.Lock()
+							delete(c.nodemapper, kn)
+							c.nodemapLock.Unlock()
+							break
+						}
 					}
-				}
 
-				if c.config.AutoHostEndpoints && c.syncStatus == bapi.InSync {
-					hepName := c.generateAutoHostendpointName(nodeName)
-					err := c.deleteHostendpointWithRetries(hepName)
-					if err != nil {
-						logrus.WithError(err).Fatal()
+					if c.config.AutoHostEndpoints && c.syncStatus == bapi.InSync {
+						hepName := c.generateAutoHostendpointName(nodeName)
+						err := c.deleteHostendpointWithRetries(hepName)
+						if err != nil {
+							logrus.WithError(err).Fatal()
+						}
 					}
+				default:
+					// Shouldn't have any other kinds show up here.
+					logrus.Warnf("Unexpected kind received over syncer: %s", upd.KVPair.Key.(model.ResourceKey).Kind)
 				}
 			}
 
