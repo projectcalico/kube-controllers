@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	log "github.com/sirupsen/logrus"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/srv"
@@ -174,6 +176,15 @@ func main() {
 
 	// Set the log level from the merged config.
 	log.SetLevel(runCfg.LogLevelScreen)
+
+	// Serve prometheus metrics.
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		err := http.ListenAndServe(":2112", nil)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to serve prometheus metrics")
+		}
+	}()
 
 	// Run the controllers. This runs until a config change triggers a restart
 	controllerCtrl.RunControllers()
