@@ -41,10 +41,19 @@ func (c *NodeController) initSyncer() {
 
 // listBlocks returns the full set of IPAM blocks from the controller's cache, as populated by the syncer.
 func (c *NodeController) listBlocks() (map[string]model.KVPair, error) {
-	c.nodemapLock.Lock()
-	defer c.nodemapLock.Unlock()
+	c.Lock()
+	defer c.Unlock()
 	blocks := c.allBlocks
 	return blocks, nil
+}
+
+// getCalicoNode returns the Calico node name for the given Kubernetes node name, as it exists in the syncer's cache,
+// and a boolean indicating cache hit or miss.
+func (c *NodeController) getCalicoNode(cn string) (string, bool) {
+	c.Lock()
+	defer c.Unlock()
+	kn, ok := c.nodemapper[cn]
+	return kn, ok
 }
 
 func (c *NodeController) OnStatusUpdated(status bapi.SyncStatus) {
@@ -74,9 +83,9 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 		case bapi.UpdateTypeKVUpdated:
 			switch upd.KVPair.Value.(type) {
 			case *model.AllocationBlock:
-				c.nodemapLock.Lock()
+				c.Lock()
 				c.allBlocks[upd.Key.(model.BlockKey).CIDR.String()] = upd.KVPair
-				c.nodemapLock.Unlock()
+				c.Unlock()
 				kick(c.blockUpdate)
 			case *apiv3.Node:
 				n := upd.KVPair.Value.(*apiv3.Node)
@@ -84,9 +93,9 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 				if kn := getK8sNodeName(*n); kn != "" {
 					// Create a mapping from Kubernetes node -> Calico node.
 					logrus.Debugf("Mapping k8s node -> calico node. %s -> %s", kn, n.Name)
-					c.nodemapLock.Lock()
+					c.Lock()
 					c.nodemapper[kn] = n.Name
-					c.nodemapLock.Unlock()
+					c.Unlock()
 
 					if c.config.SyncLabels {
 						// It has a node reference - get that Kubernetes node, and if
@@ -128,9 +137,9 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 
 			switch upd.KVPair.Key.(type) {
 			case model.BlockKey:
-				c.nodemapLock.Lock()
+				c.Lock()
 				delete(c.allBlocks, upd.Key.(model.BlockKey).CIDR.String())
-				c.nodemapLock.Unlock()
+				c.Unlock()
 				kick(c.blockUpdate)
 			case model.ResourceKey:
 				switch upd.KVPair.Key.(model.ResourceKey).Kind {
@@ -141,9 +150,9 @@ func (c *NodeController) OnUpdates(updates []bapi.Update) {
 						if cn == nodeName {
 							// Remove it from node map.
 							logrus.Debugf("Unmapping k8s node -> calico node. %s -> %s", kn, cn)
-							c.nodemapLock.Lock()
+							c.Lock()
 							delete(c.nodemapper, kn)
-							c.nodemapLock.Unlock()
+							c.Unlock()
 							break
 						}
 					}

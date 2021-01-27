@@ -53,6 +53,7 @@ var (
 // NodeController implements the Controller interface.  It is responsible for monitoring
 // kubernetes nodes and responding to delete events by removing them from the Calico datastore.
 type NodeController struct {
+	sync.Mutex
 	ctx          context.Context
 	informer     cache.Controller
 	indexer      cache.Indexer
@@ -63,7 +64,6 @@ type NodeController struct {
 	blockUpdate  chan interface{}
 	nodemapper   map[string]string
 	allBlocks    map[string]model.KVPair
-	nodemapLock  sync.Mutex
 	syncer       bapi.Syncer
 	config       config.NodeControllerConfig
 	nodeCache    map[string]*api.Node

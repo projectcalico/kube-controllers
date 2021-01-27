@@ -336,8 +336,8 @@ func (c *NodeController) podExistsOnNode(name, ns, node string) bool {
 // kubernetesNodeForCalico returns the name of the Kubernetes node that corresponds to this Calico node.
 // This function returns an empty string if no action should be taken for this node.
 func (c *NodeController) kubernetesNodeForCalico(cnode string) (string, error) {
-	c.nodemapLock.Lock()
-	defer c.nodemapLock.Unlock()
+	c.Lock()
+	defer c.Unlock()
 
 	for kn, cn := range c.nodemapper {
 		if cn == cnode {
