@@ -49,11 +49,11 @@ func (c *NodeController) listBlocks() (map[string]model.KVPair, error) {
 
 // getCalicoNode returns the Calico node name for the given Kubernetes node name, as it exists in the syncer's cache,
 // and a boolean indicating cache hit or miss.
-func (c *NodeController) getCalicoNode(cn string) (string, bool) {
+func (c *NodeController) getCalicoNode(kn string) (string, bool) {
 	c.Lock()
 	defer c.Unlock()
-	kn, ok := c.nodemapper[cn]
-	return kn, ok
+	cn, ok := c.nodemapper[kn]
+	return cn, ok
 }
 
 func (c *NodeController) OnStatusUpdated(status bapi.SyncStatus) {
