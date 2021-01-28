@@ -177,14 +177,17 @@ func main() {
 	// Set the log level from the merged config.
 	log.SetLevel(runCfg.LogLevelScreen)
 
-	// Serve prometheus metrics.
-	go func() {
-		http.Handle("/metrics", promhttp.Handler())
-		err := http.ListenAndServe(":2112", nil)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to serve prometheus metrics")
-		}
-	}()
+	if runCfg.PrometheusPort != 0 {
+		// Serve prometheus metrics.
+		log.Infof("Starting Prometheus metrics server on port %d", runCfg.PrometheusPort)
+		go func() {
+			http.Handle("/metrics", promhttp.Handler())
+			err := http.ListenAndServe(fmt.Sprintf(":%d", runCfg.PrometheusPort), nil)
+			if err != nil {
+				log.WithError(err).Fatal("Failed to serve prometheus metrics")
+			}
+		}()
+	}
 
 	// Run the controllers. This runs until a config change triggers a restart
 	controllerCtrl.RunControllers()
