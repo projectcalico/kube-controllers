@@ -367,24 +367,24 @@ func mergeConfig(envVars map[string]string, envCfg Config, apiCfg v3.KubeControl
 		rc.RouteReflector.DatastoreType = dsType
 
 		// TODO find a better way to map
-		rrAPICfg := apiCfg.Controllers.RouteReflector
-		if rrAPICfg != nil {
-			if rrAPICfg.ReconcilerPeriod != nil {
-				rc.RouteReflector.ReconcilerPeriod = rrAPICfg.ReconcilerPeriod.Duration
+
+		if apiCfg.Controllers.RouteReflector != nil {
+			if apiCfg.Controllers.RouteReflector.ReconcilerPeriod != nil {
+				rc.RouteReflector.ReconcilerPeriod = apiCfg.Controllers.RouteReflector.ReconcilerPeriod.Duration
 			} else {
 				rc.RouteReflector.ReconcilerPeriod = v1.Duration{Duration: time.Minute * 5}.Duration
 			}
-			rc.RouteReflector.TopologyType = rrAPICfg.TopologyType
-			rc.RouteReflector.ClusterID = rrAPICfg.ClusterID
-			rc.RouteReflector.Min = rrAPICfg.Min
-			rc.RouteReflector.Max = rrAPICfg.Max
-			rc.RouteReflector.Ratio = rrAPICfg.Ratio
-			rc.RouteReflector.RouteReflectorsPerNode = rrAPICfg.RouteReflectorsPerNode
-			rc.RouteReflector.RouteReflectorLabelKey = rrAPICfg.RouteReflectorLabelKey
-			rc.RouteReflector.RouteReflectorLabelValue = rrAPICfg.RouteReflectorLabelValue
-			rc.RouteReflector.ZoneLabel = rrAPICfg.ZoneLabel
-			rc.RouteReflector.HostnameLabel = rrAPICfg.HostnameLabel
-			rc.RouteReflector.IncompatibleLabels = rrAPICfg.IncompatibleLabels
+			rc.RouteReflector.TopologyType = apiCfg.Controllers.RouteReflector.TopologyType
+			rc.RouteReflector.ClusterID = apiCfg.Controllers.RouteReflector.ClusterID
+			rc.RouteReflector.Min = apiCfg.Controllers.RouteReflector.Min
+			rc.RouteReflector.Max = apiCfg.Controllers.RouteReflector.Max
+			rc.RouteReflector.Ratio = apiCfg.Controllers.RouteReflector.Ratio
+			rc.RouteReflector.RouteReflectorsPerNode = apiCfg.Controllers.RouteReflector.RouteReflectorsPerNode
+			rc.RouteReflector.RouteReflectorLabelKey = apiCfg.Controllers.RouteReflector.RouteReflectorLabelKey
+			rc.RouteReflector.RouteReflectorLabelValue = apiCfg.Controllers.RouteReflector.RouteReflectorLabelValue
+			rc.RouteReflector.ZoneLabel = apiCfg.Controllers.RouteReflector.ZoneLabel
+			rc.RouteReflector.HostnameLabel = apiCfg.Controllers.RouteReflector.HostnameLabel
+			rc.RouteReflector.IncompatibleLabels = apiCfg.Controllers.RouteReflector.IncompatibleLabels
 		}
 	}
 

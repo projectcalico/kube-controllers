@@ -51,3 +51,7 @@ replace (
 	k8s.io/metrics => k8s.io/metrics v0.18.12
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.18.12
 )
+
+replace github.com/projectcalico/libcalico-go => ../libcalico-go
+
+replace github.com/projectcalico/felix => ../felix

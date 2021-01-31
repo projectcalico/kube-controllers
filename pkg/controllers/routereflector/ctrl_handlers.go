@@ -155,7 +155,7 @@ func (c *ctrl) OnKubeDelete(obj interface{}) {
 }
 
 func (c *ctrl) waitForSync() {
-	logrus.Info("Waiting for sync to calcualte rote reflector topology")
+	logrus.Info("Waiting for sync to calculate rote reflector topology")
 	c.syncWaitGroup.Wait()
-	logrus.Info("Sync done, time to calcualte rote reflector topology")
+	logrus.Info("Sync done, time to calculate rote reflector topology")
 }

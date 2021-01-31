@@ -125,22 +125,18 @@ func (c *ctrl) initSyncers(datastore apiconfig.DatastoreType, client client.Inte
 		Backend() bapi.Client
 	}
 
-	if datastore == apiconfig.EtcdV3 {
-		calicoNodeResources := []watchersyncer.ResourceType{
-			{
-				ListInterface: model.ResourceListOptions{Kind: apiv3.KindNode},
-			},
-		}
-		c.calicoNodeSyncer = watchersyncer.New(client.(accessor).Backend(), calicoNodeResources, &calicoNodeSyncer{c})
-		c.syncWaitGroup.Add(1)
-	}
-
-	bgpPeerResources := []watchersyncer.ResourceType{
+	watchResources := []watchersyncer.ResourceType{
 		{
 			ListInterface: model.ResourceListOptions{Kind: apiv3.KindBGPPeer},
 		},
 	}
-	c.bgpPeerSyncer = watchersyncer.New(client.(accessor).Backend(), bgpPeerResources, &bgpPeerSyncer{c})
+	if datastore == apiconfig.EtcdV3 {
+		watchResources = append(watchResources, watchersyncer.ResourceType{
+			ListInterface: model.ResourceListOptions{Kind: apiv3.KindNode},
+		})
+		c.syncWaitGroup.Add(1)
+	}
+	c.bgpPeerSyncer = watchersyncer.New(client.(accessor).Backend(), watchResources, &bgpPeerSyncer{c})
 	c.syncWaitGroup.Add(1)
 
 	// Create a Node watcher.

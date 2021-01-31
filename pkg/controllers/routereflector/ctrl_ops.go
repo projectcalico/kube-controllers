@@ -42,7 +42,7 @@ func (c *ctrl) delete(kubeNode *corev1.Node) error {
 }
 
 func (c *ctrl) update(kubeNode *corev1.Node) error {
-	if err := c.revertFailedModification(); err != nil {
+	if err := c.revertFailedModifications(); err != nil {
 		return err
 	}
 
@@ -51,14 +51,14 @@ func (c *ctrl) update(kubeNode *corev1.Node) error {
 
 	if err := c.updateNodeLabels(affectedNodes); err != nil {
 		return err
-	} else if err := c.updateBGPTopology(kubeNode, affectedNodes); err != nil {
+	} else if err := c.updateBGPTopology(affectedNodes); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c *ctrl) revertFailedModification() error {
+func (c *ctrl) revertFailedModifications() error {
 	for _, kubeNode := range c.kubeNodes {
 		status, ok := c.routeReflectorsUnderOperation[kubeNode.GetUID()]
 		if !ok {
@@ -137,7 +137,7 @@ func (c *ctrl) updateNodeLabels(affectedNodes map[*corev1.Node]bool) error {
 	return nil
 }
 
-func (c *ctrl) updateBGPTopology(kubeNode *corev1.Node, affectedNodes map[*corev1.Node]bool) error {
+func (c *ctrl) updateBGPTopology(affectedNodes map[*corev1.Node]bool) error {
 	bgpPeers := []*apiv3.BGPPeer{}
 	for _, p := range c.bgpPeers {
 		bgpPeers = append(bgpPeers, p)
