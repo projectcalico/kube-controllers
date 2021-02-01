@@ -42,21 +42,21 @@ var (
 func registerPrometheusMetrics() {
 	// Total IP allocations.
 	ipsGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "ipam_allocations",
+		Name: "ipam_allocations_per_node",
 		Help: "Number of IPs allocated",
 	}, []string{"node"})
 	prometheus.MustRegister(ipsGauge)
 
 	// Borrowed IPs.
 	borrowedGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "ipam_borrowed_allocations",
+		Name: "ipam_allocations_borrowed_per_node",
 		Help: "Number of allocated IPs that are from non-affine blocks.",
 	}, []string{"node"})
 	prometheus.MustRegister(borrowedGauge)
 
 	// Blocks per-node.
 	blocksGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "ipam_blocks",
+		Name: "ipam_blocks_per_node",
 		Help: "Number of blocks in IPAM",
 	}, []string{"node"})
 	prometheus.MustRegister(blocksGauge)

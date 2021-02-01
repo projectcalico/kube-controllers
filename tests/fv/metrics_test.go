@@ -205,11 +205,11 @@ var _ = Describe("kube-controllers metrics tests", func() {
 
 		// Assert that IPAM metrics have been updated to include the blocks and allocations from above.
 		expectedMetrics := []string{
-			`ipam_allocations{node="node-a"} 4`,
-			`ipam_allocations{node="node-b"} 1`,
-			`ipam_blocks{node="node-a"} 1`,
-			`ipam_blocks{node="node-b"} 1`,
-			`ipam_blocks{node="node-c"} 1`,
+			`ipam_allocations_per_node{node="node-a"} 4`,
+			`ipam_allocations_per_node{node="node-b"} 1`,
+			`ipam_blocks_per_node{node="node-a"} 1`,
+			`ipam_blocks_per_node{node="node-b"} 1`,
+			`ipam_blocks_per_node{node="node-c"} 1`,
 		}
 		Eventually(func() error {
 			out, err = getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
@@ -229,13 +229,13 @@ var _ = Describe("kube-controllers metrics tests", func() {
 		// Assert that IPAM metrics have been updated. It should now show a block with no affinity,
 		// and an IP address that is "borrowed" from the empty block on node C.
 		expectedMetrics = []string{
-			`ipam_allocations{node="node-a"} 4`,
-			`ipam_allocations{node="node-b"} 1`,
-			`ipam_allocations{node="node-c"} 1`,
-			`ipam_blocks{node="node-a"} 1`,
-			`ipam_blocks{node="node-b"} 1`,
-			`ipam_blocks{node="no_affinity"} 1`,
-			`ipam_borrowed_allocations{node="node-c"} 1`,
+			`ipam_allocations_per_node{node="node-a"} 4`,
+			`ipam_allocations_per_node{node="node-b"} 1`,
+			`ipam_allocations_per_node{node="node-c"} 1`,
+			`ipam_blocks_per_node{node="node-a"} 1`,
+			`ipam_blocks_per_node{node="node-b"} 1`,
+			`ipam_blocks_per_node{node="no_affinity"} 1`,
+			`ipam_allocations_borrowed_per_node{node="node-c"} 1`,
 		}
 		Eventually(func() error {
 			out, err = getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
@@ -258,8 +258,8 @@ var _ = Describe("kube-controllers metrics tests", func() {
 
 		// Assert that IPAM metrics for node-c have been updated.
 		expectedMetrics = []string{
-			`ipam_allocations{node="node-c"} 2`,
-			`ipam_borrowed_allocations{node="node-c"} 2`,
+			`ipam_allocations_per_node{node="node-c"} 2`,
+			`ipam_allocations_borrowed_per_node{node="node-c"} 2`,
 		}
 		Eventually(func() error {
 			out, err = getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
@@ -315,16 +315,16 @@ var _ = Describe("kube-controllers metrics tests", func() {
 		// the block should still exist. Since we don't release affinity until the block is empty, the block should
 		// still be affine to node-b.
 		notExpectedMetrics := []string{
-			`ipam_allocations{node="node-b"}`,
-			`ipam_blocks{node="node-c"}`,
+			`ipam_allocations_per_node{node="node-b"}`,
+			`ipam_blocks_per_node{node="node-c"}`,
 		}
 		expectedMetrics = []string{
-			`ipam_allocations{node="node-a"} 4`,
-			`ipam_allocations{node="node-c"} 2`,
-			`ipam_blocks{node="node-a"} 1`,
-			`ipam_blocks{node="node-b"} 1`,
-			`ipam_blocks{node="no_affinity"} 1`,
-			`ipam_borrowed_allocations{node="node-c"} 2`,
+			`ipam_allocations_per_node{node="node-a"} 4`,
+			`ipam_allocations_per_node{node="node-c"} 2`,
+			`ipam_blocks_per_node{node="node-a"} 1`,
+			`ipam_blocks_per_node{node="node-b"} 1`,
+			`ipam_blocks_per_node{node="no_affinity"} 1`,
+			`ipam_allocations_borrowed_per_node{node="node-c"} 2`,
 		}
 		Eventually(func() error {
 			out, err = getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
@@ -362,16 +362,16 @@ var _ = Describe("kube-controllers metrics tests", func() {
 		// Assert that IPAM metrics have been updated. Both blocks should now be released, and all that should be
 		// left is the block and allocations for node A.
 		notExpectedMetrics = []string{
-			`ipam_allocations{node="node-c"}`,
-			`ipam_allocations{node="node-b"}`,
-			`ipam_blocks{node="node-b"}`,
-			`ipam_blocks{node="node-c"}`,
-			`ipam_blocks{node="no_affinity"}`,
-			`ipam_borrowed_allocations{node="node-c"}`,
+			`ipam_allocations_per_node{node="node-c"}`,
+			`ipam_allocations_per_node{node="node-b"}`,
+			`ipam_blocks_per_node{node="node-b"}`,
+			`ipam_blocks_per_node{node="node-c"}`,
+			`ipam_blocks_per_node{node="no_affinity"}`,
+			`ipam_allocations_borrowed_per_node{node="node-c"}`,
 		}
 		expectedMetrics = []string{
-			`ipam_allocations{node="node-a"} 4`,
-			`ipam_blocks{node="node-a"} 1`,
+			`ipam_allocations_per_node{node="node-a"} 4`,
+			`ipam_blocks_per_node{node="node-a"} 1`,
 		}
 		Eventually(func() error {
 			out, err = getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
