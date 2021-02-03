@@ -153,7 +153,7 @@ var _ = Describe("kube-controllers metrics tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Assert no IPAM metrics reported yet.
-		out, err := getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
+		out, err := getMetrics(fmt.Sprintf("http://%s:9094/metrics", kubeControllers.IP))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(out).NotTo(ContainSubstring("ipam_"))
 
@@ -212,7 +212,7 @@ var _ = Describe("kube-controllers metrics tests", func() {
 			`ipam_blocks_per_node{node="node-c"} 1`,
 		}
 		Eventually(func() error {
-			out, err = getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
+			out, err = getMetrics(fmt.Sprintf("http://%s:9094/metrics", kubeControllers.IP))
 			Expect(err).NotTo(HaveOccurred())
 			for _, s := range expectedMetrics {
 				if !strings.Contains(out, s) {
@@ -238,7 +238,7 @@ var _ = Describe("kube-controllers metrics tests", func() {
 			`ipam_allocations_borrowed_per_node{node="node-c"} 1`,
 		}
 		Eventually(func() error {
-			out, err = getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
+			out, err = getMetrics(fmt.Sprintf("http://%s:9094/metrics", kubeControllers.IP))
 			Expect(err).NotTo(HaveOccurred())
 			for _, s := range expectedMetrics {
 				if !strings.Contains(out, s) {
@@ -262,7 +262,7 @@ var _ = Describe("kube-controllers metrics tests", func() {
 			`ipam_allocations_borrowed_per_node{node="node-c"} 2`,
 		}
 		Eventually(func() error {
-			out, err = getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
+			out, err = getMetrics(fmt.Sprintf("http://%s:9094/metrics", kubeControllers.IP))
 			Expect(err).NotTo(HaveOccurred())
 			for _, s := range expectedMetrics {
 				if !strings.Contains(out, s) {
@@ -327,7 +327,7 @@ var _ = Describe("kube-controllers metrics tests", func() {
 			`ipam_allocations_borrowed_per_node{node="node-c"} 2`,
 		}
 		Eventually(func() error {
-			out, err = getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
+			out, err = getMetrics(fmt.Sprintf("http://%s:9094/metrics", kubeControllers.IP))
 			Expect(err).NotTo(HaveOccurred())
 			for _, s := range expectedMetrics {
 				if !strings.Contains(out, s) {
@@ -374,7 +374,7 @@ var _ = Describe("kube-controllers metrics tests", func() {
 			`ipam_blocks_per_node{node="node-a"} 1`,
 		}
 		Eventually(func() error {
-			out, err = getMetrics(fmt.Sprintf("http://%s:2112/metrics", kubeControllers.IP))
+			out, err = getMetrics(fmt.Sprintf("http://%s:9094/metrics", kubeControllers.IP))
 			Expect(err).NotTo(HaveOccurred())
 			for _, s := range expectedMetrics {
 				if !strings.Contains(out, s) {
