@@ -82,8 +82,10 @@ func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.C
 
 	switch cfg.DatastoreType {
 	case apiconfig.Kubernetes:
+		ctrl.datastoreType = apiconfig.Kubernetes
 		ctrl.datastore = datastores.NewKddDatastore(ctrl.topology)
 	case apiconfig.EtcdV3:
+		ctrl.datastoreType = apiconfig.EtcdV3
 		ctrl.datastore = datastores.NewEtcdDatastore(ctrl.topology, ctrl.calicoNodeClient)
 	default:
 		panic(fmt.Errorf("Unsupported Data Store %s", string(cfg.DatastoreType)))

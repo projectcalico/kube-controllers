@@ -65,39 +65,32 @@ var notReadyTaints = map[string]bool{
 }
 
 type ctrl struct {
-	updateMutex     sync.Mutex
-	syncWaitGroup   *sync.WaitGroup
-	waitForSyncOnce sync.Once
+	updateMutex      sync.Mutex
+	syncWaitGroup    *sync.WaitGroup
+	waitForSyncOnce  sync.Once
+	resourceSyncer   bapi.Syncer
+	kubeNodeInformer cache.Controller
 
 	calicoNodeClient client.NodeInterface
 	k8sNodeClient    k8sNodeClient
 
-	kubeNodeInformer cache.Controller
-	kubeNodes        map[types.UID]*corev1.Node
-
-	calicoNodeSyncer bapi.Syncer
-	calicoNodes      map[string]*apiv3.Node
-
-	bgpPeerSyncer bapi.Syncer
-	bgpPeers      map[string]*apiv3.BGPPeer
-	bgpPeer       bgpPeer
+	kubeNodes   map[types.UID]*corev1.Node
+	calicoNodes map[string]*apiv3.Node
+	bgpPeers    map[string]*apiv3.BGPPeer
 
 	routeReflectorsUnderOperation map[types.UID]bool
 
+	bgpPeer            bgpPeer
 	topology           topologies.Topology
+	datastoreType      apiconfig.DatastoreType
 	datastore          datastores.Datastore
 	hostnameLabel      string
 	incompatibleLabels map[string]*string
 }
 
 func (c *ctrl) Run(stopCh chan struct{}) {
-	if c.datastore.GetType() == apiconfig.EtcdV3 {
-		// Start the Calico node syncer.
-		go c.calicoNodeSyncer.Start()
-	}
-
 	// Start the BGP peersyncer.
-	go c.bgpPeerSyncer.Start()
+	go c.resourceSyncer.Start()
 
 	// Wait till k8s cache is synced
 	go c.kubeNodeInformer.Run(stopCh)
@@ -136,7 +129,7 @@ func (c *ctrl) initSyncers(datastore apiconfig.DatastoreType, client client.Inte
 		})
 		c.syncWaitGroup.Add(1)
 	}
-	c.bgpPeerSyncer = watchersyncer.New(client.(accessor).Backend(), watchResources, &bgpPeerSyncer{c})
+	c.resourceSyncer = watchersyncer.New(client.(accessor).Backend(), watchResources, &bgpPeerSyncer{c})
 	c.syncWaitGroup.Add(1)
 
 	// Create a Node watcher.

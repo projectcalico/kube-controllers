@@ -15,7 +15,6 @@
 package datastores
 
 import (
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -26,10 +25,6 @@ const (
 
 type KddDataStore struct {
 	nodeInfo nodeInfo
-}
-
-func (d *KddDataStore) GetType() apiconfig.DatastoreType {
-	return apiconfig.Kubernetes
 }
 
 func (d *KddDataStore) RemoveRRStatus(node *corev1.Node, _ *apiv3.Node) error {

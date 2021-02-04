@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	log "github.com/sirupsen/logrus"
@@ -32,10 +31,6 @@ type calicoNodeClient interface {
 type EtcdDataStore struct {
 	nodeInfo     nodeInfo
 	calicoClient calicoNodeClient
-}
-
-func (d *EtcdDataStore) GetType() apiconfig.DatastoreType {
-	return apiconfig.EtcdV3
 }
 
 func (d *EtcdDataStore) RemoveRRStatus(kubeNode *corev1.Node, calicoNode *apiv3.Node) error {
@@ -63,7 +58,7 @@ func (d *EtcdDataStore) updateRouteReflectorClusterID(kubeNode *corev1.Node, cal
 
 	log.Infof("Adding route reflector cluster ID in %s to '%s' for %s", calicoNode.GetName(), clusterID, kubeNode.GetName())
 	if _, err := d.calicoClient.Update(context.Background(), calicoNode, options.SetOptions{}); err != nil {
-		log.Errorf("Unable to update Calico node %s because of %s", kubeNode.GetName(), err.Error())
+		log.Errorf("Unable to update Calico node %s: %s", kubeNode.GetName(), err.Error())
 		return err
 	}
 

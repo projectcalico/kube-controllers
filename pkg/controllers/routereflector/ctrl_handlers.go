@@ -15,11 +15,18 @@
 package routereflector
 
 import (
+	"time"
+
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+)
+
+var (
+	retrySleepTime = 100 * time.Millisecond
+	retries        = 5
 )
 
 type calicoNodeSyncer struct {
@@ -129,9 +136,22 @@ func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
 
 	c.kubeNodes[newKubeNode.GetUID()] = newKubeNode
 
-	if err := c.update(newKubeNode); err != nil {
-		logrus.Errorf("Unable to update Kube node %s because of %s", newKubeNode.GetName(), err)
+	var err error
+	for n := 1; n <= retries; n++ {
+		if err = c.revertFailedModifications(); err != nil {
+			logrus.Infof("Unable to revert modifications: %s", err)
+			time.Sleep(retrySleepTime)
+			continue
+		}
+
+		if err = c.update(newKubeNode); err != nil {
+			logrus.Infof("Unable to update Kube node %s: %s", newKubeNode.GetName(), err)
+			time.Sleep(retrySleepTime)
+			continue
+		}
+		return
 	}
+	logrus.Errorf("Unable to update Kube node %s: %s", newKubeNode.GetName(), err)
 }
 
 func (c *ctrl) OnKubeDelete(obj interface{}) {
@@ -147,11 +167,23 @@ func (c *ctrl) OnKubeDelete(obj interface{}) {
 		return
 	}
 
-	if err := c.delete(kubeNode); err != nil {
-		logrus.Errorf("Unable to delete Kube node %s because of %s", kubeNode.GetName(), err)
-	}
+	var err error
+	for n := 1; n <= retries; n++ {
+		if err = c.revertFailedModifications(); err != nil {
+			logrus.Infof("Unable to revert modifications: %s", err)
+			time.Sleep(retrySleepTime)
+			continue
+		}
 
-	delete(c.kubeNodes, kubeNode.GetUID())
+		if err = c.delete(kubeNode); err != nil {
+			logrus.Infof("Unable to delete Kube node %s: %s", kubeNode.GetName(), err)
+			time.Sleep(retrySleepTime)
+			continue
+		}
+		delete(c.kubeNodes, kubeNode.GetUID())
+		return
+	}
+	logrus.Errorf("Unable to delete Kube node %s: %s", kubeNode.GetName(), err)
 }
 
 func (c *ctrl) waitForSync() {

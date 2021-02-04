@@ -15,13 +15,11 @@
 package datastores
 
 import (
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	corev1 "k8s.io/api/core/v1"
 )
 
 type Datastore interface {
-	GetType() apiconfig.DatastoreType
 	RemoveRRStatus(*corev1.Node, *apiv3.Node) error
 	AddRRStatus(*corev1.Node, *apiv3.Node) error
 }

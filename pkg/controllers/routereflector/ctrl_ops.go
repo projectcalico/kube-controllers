@@ -29,7 +29,7 @@ func (c *ctrl) delete(kubeNode *corev1.Node) error {
 		if !c.isNodeActive(kubeNode) {
 			// Node is deleted right now or has some issues, better to remove form RRs
 			if err := c.removeRRStatus(kubeNode); err != nil {
-				log.Errorf("Unable to cleanup label on %s because of %s", kubeNode.GetName(), err.Error())
+				log.Errorf("Unable to cleanup label on %s: %s", kubeNode.GetName(), err.Error())
 				return err
 			}
 
@@ -42,10 +42,6 @@ func (c *ctrl) delete(kubeNode *corev1.Node) error {
 }
 
 func (c *ctrl) update(kubeNode *corev1.Node) error {
-	if err := c.revertFailedModifications(); err != nil {
-		return err
-	}
-
 	affectedNodes := c.collectNodeInfo(c.topology.GetNodeFilter(kubeNode))
 	log.Debug("Affected nodes: %#v", affectedNodes)
 
@@ -72,25 +68,29 @@ func (c *ctrl) revertFailedModifications() error {
 			err = c.datastore.AddRRStatus(kubeNode, c.findCalicoNode(kubeNode))
 		}
 		if err != nil {
-			log.Errorf("Failed to revert node %s because of %s", kubeNode.GetName(), err.Error())
+			log.Errorf("Failed to revert node %s: %s", kubeNode.GetName(), err.Error())
 			return err
 		}
 
 		log.Infof("Revert route reflector label on %s to %t", kubeNode.GetName(), !status)
 		kubeNode, err := c.k8sNodeClient.Get(context.Background(), kubeNode.GetName(), metav1.GetOptions{})
 		if err != nil {
-			log.Errorf("Unable to fetch kube node %s because of %s", kubeNode.GetName(), err.Error())
+			log.Errorf("Unable to fetch kube node %s: %s", kubeNode.GetName(), err.Error())
 			return err
 		}
 
 		if _, err := c.k8sNodeClient.Update(context.Background(), kubeNode, metav1.UpdateOptions{}); err != nil {
-			log.Errorf("Failed to revert update node %s because of %s", kubeNode.GetName(), err.Error())
+			log.Errorf("Failed to revert update node %s: %s", kubeNode.GetName(), err.Error())
 			return err
 		}
 
-		delete(c.routeReflectorsUnderOperation, kubeNode.GetUID())
-
-		return c.update(kubeNode)
+		err = c.update(kubeNode)
+		if err != nil {
+			log.Errorf("Failed to persist revert node %s: %s", kubeNode.GetName(), err.Error())
+		} else {
+			delete(c.routeReflectorsUnderOperation, kubeNode.GetUID())
+		}
+		return err
 	}
 
 	return nil
@@ -114,7 +114,7 @@ func (c *ctrl) updateNodeLabels(affectedNodes map[*corev1.Node]bool) error {
 
 			if diff := status.ExpectedRRs - status.ActualRRs; diff != 0 {
 				if updated, err := c.updateRRStatus(n, diff); err != nil {
-					log.Errorf("Unable to update node %s because of %s", n.GetName(), err.Error())
+					log.Errorf("Unable to update node %s: %s", n.GetName(), err.Error())
 					return err
 				} else if updated && diff > 0 {
 					status.ActualRRs++
@@ -153,7 +153,7 @@ func (c *ctrl) updateBGPTopology(affectedNodes map[*corev1.Node]bool) error {
 	for _, bp := range toRefresh {
 		log.Infof("Saving %s BGPPeer", bp.Name)
 		if err := c.bgpPeer.save(bp); err != nil {
-			log.Errorf("Unable to save BGPPeer because of %s", err.Error())
+			log.Errorf("Unable to save BGPPeer: %s", err.Error())
 			return err
 		}
 	}
@@ -162,10 +162,10 @@ func (c *ctrl) updateBGPTopology(affectedNodes map[*corev1.Node]bool) error {
 		log.Debugf("Removing BGPPeer: %s", p.GetName())
 		if err := c.bgpPeer.remove(p); err != nil {
 			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); !ok {
-				log.Errorf("Unable to remove BGPPeer because of %s", err.Error())
+				log.Errorf("Unable to remove BGPPeer: %s", err.Error())
 				return err
 			}
-			log.Debugf("Unable to remove BGPPeer because of %s", err.Error())
+			log.Debugf("Unable to remove BGPPeer: %s", err.Error())
 		}
 	}
 
@@ -176,13 +176,13 @@ func (c *ctrl) removeRRStatus(kubeNode *corev1.Node) error {
 	c.routeReflectorsUnderOperation[kubeNode.GetUID()] = false
 
 	if err := c.datastore.RemoveRRStatus(kubeNode, c.findCalicoNode(kubeNode)); err != nil {
-		log.Errorf("Unable to cleanup RR status %s because of %s", kubeNode.GetName(), err.Error())
+		log.Errorf("Unable to cleanup RR status %s: %s", kubeNode.GetName(), err.Error())
 		return err
 	}
 
 	log.Infof("Removing route reflector label from %s", kubeNode.GetName())
 	if _, err := c.k8sNodeClient.Update(context.Background(), kubeNode, metav1.UpdateOptions{}); err != nil {
-		log.Errorf("Unable to cleanup node %s because of %s", kubeNode.GetName(), err.Error())
+		log.Errorf("Unable to cleanup node %s: %s", kubeNode.GetName(), err.Error())
 		return err
 	}
 
@@ -201,20 +201,20 @@ func (c *ctrl) updateRRStatus(kubeNode *corev1.Node, diff int) (bool, error) {
 
 	if diff < 0 {
 		if err := c.datastore.RemoveRRStatus(kubeNode, c.findCalicoNode(kubeNode)); err != nil {
-			log.Errorf("Unable to delete RR status %s because of %s", kubeNode.GetName(), err.Error())
+			log.Errorf("Unable to delete RR status %s: %s", kubeNode.GetName(), err.Error())
 			return false, err
 		}
 		log.Infof("Removing route reflector label from %s", kubeNode.GetName())
 	} else {
 		if err := c.datastore.AddRRStatus(kubeNode, c.findCalicoNode(kubeNode)); err != nil {
-			log.Errorf("Unable to add RR status %s because of %s", kubeNode.GetName(), err.Error())
+			log.Errorf("Unable to add RR status %s: %s", kubeNode.GetName(), err.Error())
 			return false, err
 		}
 		log.Infof("Adding route reflector label to %s", kubeNode.GetName())
 	}
 
 	if _, err := c.k8sNodeClient.Update(context.Background(), kubeNode, metav1.UpdateOptions{}); err != nil {
-		log.Errorf("Unable to update node %s because of %s", kubeNode.GetName(), err.Error())
+		log.Errorf("Unable to update node %s: %s", kubeNode.GetName(), err.Error())
 		return false, err
 	}
 
@@ -238,9 +238,11 @@ func (c *ctrl) collectNodeInfo(filter func(*corev1.Node) bool) (filtered map[*co
 
 func (c *ctrl) findCalicoNode(kubeNode *corev1.Node) *apiv3.Node {
 	for _, cn := range c.calicoNodes {
-		if hostname, ok := cn.GetLabels()[c.hostnameLabel]; ok && hostname == kubeNode.GetLabels()[c.hostnameLabel] {
-			log.Debugf("Calico node found %s for %s-%s", cn.GetName(), kubeNode.GetNamespace(), kubeNode.GetName())
-			return cn
+		for _, orchRef := range cn.Spec.OrchRefs {
+			if orchRef.Orchestrator == "k8s" && orchRef.NodeName == kubeNode.GetName() {
+				log.Debugf("Calico node found %s for %s-%s", cn.GetName(), kubeNode.GetNamespace(), kubeNode.GetName())
+				return cn
+			}
 		}
 	}
 
