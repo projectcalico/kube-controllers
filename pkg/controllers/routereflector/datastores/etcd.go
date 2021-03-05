@@ -24,29 +24,35 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-type calicoNodeClient interface {
+type calicoNodeClientSpec interface {
 	Update(context.Context, *apiv3.Node, options.SetOptions) (*apiv3.Node, error)
 }
 
+// EtcdDataStore ETCD data store specific functions
 type EtcdDataStore struct {
 	nodeInfo     nodeInfo
-	calicoClient calicoNodeClient
+	calicoClient calicoNodeClientSpec
 }
 
+// RemoveRRStatus removes RR related labels from node
 func (d *EtcdDataStore) RemoveRRStatus(kubeNode *corev1.Node, calicoNode *apiv3.Node) error {
 	nodeLabelKey, _ := d.nodeInfo.GetNodeLabel(string(kubeNode.GetUID()))
 	delete(kubeNode.Labels, nodeLabelKey)
 
+	// Update Calico node int ETCD
 	return d.updateRouteReflectorClusterID(kubeNode, calicoNode, "")
 }
 
+// AddRRStatus adds RR related labels from node
 func (d *EtcdDataStore) AddRRStatus(kubeNode *corev1.Node, calicoNode *apiv3.Node) error {
 	labelKey, labelValue := d.nodeInfo.GetNodeLabel(string(kubeNode.GetUID()))
 	kubeNode.Labels[labelKey] = labelValue
 
-	return d.updateRouteReflectorClusterID(kubeNode, calicoNode, d.nodeInfo.GetClusterID(string(kubeNode.GetUID()), kubeNode.GetCreationTimestamp().UnixNano()))
+	// Update Calico node int ETCD
+	return d.updateRouteReflectorClusterID(kubeNode, calicoNode, d.nodeInfo.GetClusterID(kubeNode))
 }
 
+// updateRouteReflectorClusterID updates Calico node in ETCD
 func (d *EtcdDataStore) updateRouteReflectorClusterID(kubeNode *corev1.Node, calicoNode *apiv3.Node, clusterID string) error {
 	if calicoNode == nil {
 		err := fmt.Errorf("Unable to find Calico node for %s", kubeNode.GetName())
@@ -54,6 +60,7 @@ func (d *EtcdDataStore) updateRouteReflectorClusterID(kubeNode *corev1.Node, cal
 		return err
 	}
 
+	// Set given ClusterID
 	calicoNode.Spec.BGP.RouteReflectorClusterID = clusterID
 
 	log.Infof("Adding route reflector cluster ID in %s to '%s' for %s", calicoNode.GetName(), clusterID, kubeNode.GetName())
@@ -65,7 +72,8 @@ func (d *EtcdDataStore) updateRouteReflectorClusterID(kubeNode *corev1.Node, cal
 	return nil
 }
 
-func NewEtcdDatastore(topology nodeInfo, calicoClient calicoNodeClient) Datastore {
+// NewEtcdDatastore initialise new TECD datastore
+func NewEtcdDatastore(topology nodeInfo, calicoClient calicoNodeClientSpec) Datastore {
 	return &EtcdDataStore{
 		nodeInfo:     topology,
 		calicoClient: calicoClient,

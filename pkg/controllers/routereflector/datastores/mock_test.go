@@ -19,6 +19,7 @@ import (
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/options"
+	corev1 "k8s.io/api/core/v1"
 )
 
 type mockTopology struct {
@@ -26,7 +27,7 @@ type mockTopology struct {
 	getNodeLabel func() (string, string)
 }
 
-func (m mockTopology) GetClusterID(string, int64) string {
+func (m mockTopology) GetClusterID(*corev1.Node) string {
 	return m.getClusterID()
 }
 

@@ -23,10 +23,12 @@ const (
 	RouteReflectorClusterIDAnnotation = "projectcalico.org/RouteReflectorClusterID"
 )
 
+// KddDataStore Kubernetes data store specific functions
 type KddDataStore struct {
 	nodeInfo nodeInfo
 }
 
+// RemoveRRStatus removes RR related labels from node
 func (d *KddDataStore) RemoveRRStatus(node *corev1.Node, _ *apiv3.Node) error {
 	nodeLabelKey, _ := d.nodeInfo.GetNodeLabel(string(node.GetUID()))
 	delete(node.Labels, nodeLabelKey)
@@ -35,16 +37,19 @@ func (d *KddDataStore) RemoveRRStatus(node *corev1.Node, _ *apiv3.Node) error {
 	return nil
 }
 
+// AddRRStatus adds RR related labels from node
 func (d *KddDataStore) AddRRStatus(node *corev1.Node, _ *apiv3.Node) error {
 	labelKey, labelValue := d.nodeInfo.GetNodeLabel(string(node.GetUID()))
 	node.Labels[labelKey] = labelValue
 
-	clusterID := d.nodeInfo.GetClusterID(string(node.GetUID()), node.GetCreationTimestamp().UnixNano())
+	// Calculate ClusterID for annotation
+	clusterID := d.nodeInfo.GetClusterID(node)
 	node.Annotations[RouteReflectorClusterIDAnnotation] = clusterID
 
 	return nil
 }
 
+// NewKddDatastore initialise new KDD datastore
 func NewKddDatastore(topology nodeInfo) Datastore {
 	return &KddDataStore{
 		nodeInfo: topology,

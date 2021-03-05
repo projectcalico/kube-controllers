@@ -25,6 +25,7 @@ const (
 	DefaultRouteReflectorClientName = "peer-to-rrs-%d"
 )
 
+// RouteReflectorStatus Represents the actual and desired state
 type RouteReflectorStatus struct {
 	Zones       []string
 	ActualRRs   int
@@ -32,15 +33,23 @@ type RouteReflectorStatus struct {
 	Nodes       []*corev1.Node
 }
 
+// Topology defines the main functionality of a RR topology implemetation
 type Topology interface {
+	// Node is RR or not based on topology
 	IsRouteReflector(string, map[string]string) bool
-	GetClusterID(string, int64) string
+	// Generates ClusterID of the RR
+	GetClusterID(*corev1.Node) string
+	// Generates RR label for specific node
 	GetNodeLabel(string) (string, string)
+	// Returns a filter function to select affected nodes of the current eecution
 	GetNodeFilter(*corev1.Node) func(*corev1.Node) bool
+	// Calculates current and expected number of RR
 	GetRouteReflectorStatuses(map[*corev1.Node]bool) []RouteReflectorStatus
+	// Generates BGP peer configurations based on topology
 	GenerateBGPPeers(map[*corev1.Node]bool, []*apiv3.BGPPeer) ([]*apiv3.BGPPeer, []*apiv3.BGPPeer)
 }
 
+// Config topology config
 type Config struct {
 	NodeLabelKey      string
 	NodeLabelValue    string
@@ -53,6 +62,7 @@ type Config struct {
 	ReflectorsPerNode int
 }
 
+// generateBGPPeerStub initialize a new BGPPeer stub
 func generateBGPPeerStub(name string) *apiv3.BGPPeer {
 	return &apiv3.BGPPeer{
 		TypeMeta: metav1.TypeMeta{
@@ -65,6 +75,7 @@ func generateBGPPeerStub(name string) *apiv3.BGPPeer {
 	}
 }
 
+// findBGPPeer find BGP peer by name
 func findBGPPeer(peers []*apiv3.BGPPeer, name string) *apiv3.BGPPeer {
 	for _, p := range peers {
 		if p.GetName() == name {
@@ -75,6 +86,7 @@ func findBGPPeer(peers []*apiv3.BGPPeer, name string) *apiv3.BGPPeer {
 	return nil
 }
 
+// countActiveNodes Couns active nodes
 func countActiveNodes(nodes map[*corev1.Node]bool) (actualNodes int) {
 	for _, isReady := range nodes {
 		if isReady {
@@ -85,6 +97,7 @@ func countActiveNodes(nodes map[*corev1.Node]bool) (actualNodes int) {
 	return
 }
 
+// countActiveRouteReflectors counts active RRs
 func countActiveRouteReflectors(isRouteReflector func(string, map[string]string) bool, nodes map[*corev1.Node]bool) (actualRRs int) {
 	for n, isReady := range nodes {
 		if isReady && isRouteReflector(string(n.GetUID()), n.GetLabels()) {

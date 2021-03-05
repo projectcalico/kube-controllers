@@ -20,26 +20,32 @@ import (
 	"sort"
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
+	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )
 
+// SingleTopology single cluster topology with one ClusterID
 type SingleTopology struct {
 	Config
 }
 
+// IsRouteReflector if node has exact the same label and value
 func (t *SingleTopology) IsRouteReflector(_ string, labels map[string]string) bool {
 	label, ok := labels[t.NodeLabelKey]
 	return ok && label == t.NodeLabelValue
 }
 
-func (t *SingleTopology) GetClusterID(string, int64) string {
+// GetClusterID One singleton cluster ID
+func (t *SingleTopology) GetClusterID(*corev1.Node) string {
 	return t.ClusterID
 }
 
+// GetNodeLabel RR label for node
 func (t *SingleTopology) GetNodeLabel(string) (string, string) {
 	return t.NodeLabelKey, t.NodeLabelValue
 }
 
+// GetNodeFilter collects node in the same zone
 func (t *SingleTopology) GetNodeFilter(currentNode *corev1.Node) func(*corev1.Node) bool {
 	return func(kubeNode *corev1.Node) bool {
 		if t.ZoneLabel != "" {
@@ -49,6 +55,7 @@ func (t *SingleTopology) GetNodeFilter(currentNode *corev1.Node) func(*corev1.No
 	}
 }
 
+// GetRouteReflectorStatuses calculates actual and expected based on node number within the same zone
 func (t *SingleTopology) GetRouteReflectorStatuses(affectedNodes map[*corev1.Node]bool) []RouteReflectorStatus {
 	zones := map[string]bool{}
 	sorted := []*corev1.Node{}
@@ -76,9 +83,11 @@ func (t *SingleTopology) GetRouteReflectorStatuses(affectedNodes map[*corev1.Nod
 	return []RouteReflectorStatus{status}
 }
 
+// GenerateBGPPeers generates two BGP statuses one for RRs and onr for others
 func (t *SingleTopology) GenerateBGPPeers(_ map[*corev1.Node]bool, existingPeers []*apiv3.BGPPeer) ([]*apiv3.BGPPeer, []*apiv3.BGPPeer) {
 	bgpPeerConfigs := []*apiv3.BGPPeer{}
 
+	// Find or generate RR mesh config
 	rrConfig := findBGPPeer(existingPeers, DefaultRouteReflectorMeshName)
 	if rrConfig == nil {
 		rrConfig = generateBGPPeerStub(DefaultRouteReflectorMeshName)
@@ -93,6 +102,7 @@ func (t *SingleTopology) GenerateBGPPeers(_ map[*corev1.Node]bool, existingPeers
 
 	clientConfigName := fmt.Sprintf(DefaultRouteReflectorClientName, 1)
 
+	// Find or generate client config
 	clientConfig := findBGPPeer(existingPeers, clientConfigName)
 	if clientConfig == nil {
 		clientConfig = generateBGPPeerStub(clientConfigName)
@@ -104,9 +114,20 @@ func (t *SingleTopology) GenerateBGPPeers(_ map[*corev1.Node]bool, existingPeers
 
 	bgpPeerConfigs = append(bgpPeerConfigs, clientConfig)
 
-	return bgpPeerConfigs, []*apiv3.BGPPeer{}
+	// Find obsolate BGP peers
+	toDelete := []*apiv3.BGPPeer{}
+	for _, p := range existingPeers {
+		// Ony two configs are allowed
+		if p.GetName() != DefaultRouteReflectorMeshName && p.GetName() != clientConfigName {
+			log.Debugf("Adding %s to the BGPPeers delete list", p.GetName())
+			toDelete = append(toDelete, p)
+		}
+	}
+
+	return bgpPeerConfigs, toDelete
 }
 
+// calculateExpectedNumber calculates expected number of RR
 func (t *SingleTopology) calculateExpectedNumber(readyNodes int) int {
 	exp := math.Ceil(float64(readyNodes) * t.Ration)
 	exp = math.Max(exp, float64(t.Min))
@@ -116,6 +137,7 @@ func (t *SingleTopology) calculateExpectedNumber(readyNodes int) int {
 	return int(exp)
 }
 
+// NewSingleTopology initialise a new single cluster topology
 func NewSingleTopology(config Config) Topology {
 	return &SingleTopology{
 		Config: config,

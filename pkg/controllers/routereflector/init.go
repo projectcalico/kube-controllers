@@ -27,6 +27,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
+	"github.com/projectcalico/libcalico-go/lib/options"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 
@@ -35,15 +36,23 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-type k8sNodeClient interface {
+// k8sNodeClientSpec Kube Node API requirements
+type k8sNodeClientSpec interface {
 	Get(context.Context, string, metav1.GetOptions) (*corev1.Node, error)
 	List(context.Context, metav1.ListOptions) (*corev1.NodeList, error)
 	Update(context.Context, *corev1.Node, metav1.UpdateOptions) (*corev1.Node, error)
 }
 
+// calicoClientSpec Calico Node API requirements
+type calicoClientSpec interface {
+	Update(context.Context, *apiv3.Node, options.SetOptions) (*apiv3.Node, error)
+}
+
+// NewRouteReflectorController Constructor for route reflector controller
 func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.Clientset, calicoClient client.Interface, cfg config.RouteReflectorControllerConfig) controller.Controller {
 	hostnameLabel := orDefaultString(cfg.HostnameLabel, defaultHostnameLabel)
 
+	// Initialize base controller
 	ctrl := &ctrl{
 		updateMutex:                   sync.Mutex{},
 		syncWaitGroup:                 &sync.WaitGroup{},
@@ -58,6 +67,7 @@ func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.C
 		hostnameLabel:                 hostnameLabel,
 	}
 
+	// Initialize topology config
 	topologyConfig := topologies.Config{
 		NodeLabelKey:      orDefaultString(cfg.RouteReflectorLabelKey, defaultRouteReflectorLabelKey),
 		NodeLabelValue:    orDefaultString(cfg.RouteReflectorLabelValue, defaultRouteReflectorLabelValue),
@@ -71,6 +81,7 @@ func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.C
 	}
 	log.Infof("Topology config: %v", topologyConfig)
 
+	// Initialize topology based on given type
 	switch orDefaultString(cfg.TopologyType, defaultTopologyType) {
 	case "multi":
 		ctrl.topology = topologies.NewMultiTopology(topologyConfig)
@@ -80,6 +91,7 @@ func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.C
 		panic(fmt.Errorf("Unsupported topology type %s", string(*cfg.TopologyType)))
 	}
 
+	// Initialize data store based on given type
 	switch cfg.DatastoreType {
 	case apiconfig.Kubernetes:
 		ctrl.datastoreType = apiconfig.Kubernetes
@@ -91,10 +103,12 @@ func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.C
 		panic(fmt.Errorf("Unsupported Data Store %s", string(cfg.DatastoreType)))
 	}
 
+	// Parse anty affinity labels, map value can be nil, because label specification allows value less labels
 	ctrl.incompatibleLabels = map[string]*string{}
 	if cfg.IncompatibleLabels != nil {
 		for _, l := range strings.Split(*cfg.IncompatibleLabels, ",") {
 			key, value := getKeyValue(strings.Trim(l, " "))
+			// There are labels with and without value
 			if strings.Contains(l, "=") {
 				ctrl.incompatibleLabels[key] = &value
 			} else {
@@ -103,6 +117,7 @@ func NewRouteReflectorController(ctx context.Context, k8sClientset *kubernetes.C
 		}
 	}
 
+	// Initialize resource syncers
 	ctrl.initSyncers(cfg.DatastoreType, calicoClient, k8sClientset)
 
 	return ctrl

@@ -33,6 +33,7 @@ type bgpPeerImpl struct {
 	calicoClient calicoClient.Interface
 }
 
+// save creates or save existing BGP peer from datastore
 func (b *bgpPeerImpl) save(peer *apiv3.BGPPeer) error {
 	if peer.GetUID() == "" {
 		log.Debugf("Creating new BGPPeers: %s", peer.Name)
@@ -49,6 +50,7 @@ func (b *bgpPeerImpl) save(peer *apiv3.BGPPeer) error {
 	return nil
 }
 
+// remove removes BFP peer from datastore
 func (b *bgpPeerImpl) remove(peer *apiv3.BGPPeer) error {
 	_, err := b.calicoClient.BGPPeers().Delete(context.Background(), peer.GetName(), options.DeleteOptions{})
 	return err

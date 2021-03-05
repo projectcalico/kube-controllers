@@ -24,23 +24,27 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// delete is triggered when a node has deleted from the cluster
 func (c *ctrl) delete(kubeNode *corev1.Node) error {
-	if c.topology.IsRouteReflector(string(kubeNode.GetUID()), kubeNode.GetLabels()) && kubeNode.GetDeletionTimestamp() != nil {
-		if !c.isNodeActive(kubeNode) {
-			// Node is deleted right now or has some issues, better to remove form RRs
-			if err := c.removeRRStatus(kubeNode); err != nil {
-				log.Errorf("Unable to cleanup label on %s: %s", kubeNode.GetName(), err.Error())
-				return err
-			}
-
-			log.Infof("Label was removed from node %s time to re-reconcile", kubeNode.GetName())
-			return c.update(kubeNode)
-		}
+	// Only deal with non activ totally removed nodes
+	if kubeNode.GetDeletionTimestamp() == nil || c.isNodeCompatible(kubeNode) {
+		return nil
 	}
 
-	return nil
+	if c.topology.IsRouteReflector(string(kubeNode.GetUID()), kubeNode.GetLabels()) {
+		// Node is deleted right now or has some issues, better to remove form RRs
+		if err := c.removeRRStatus(kubeNode); err != nil {
+			log.Errorf("Unable to cleanup label on %s: %s", kubeNode.GetName(), err.Error())
+			return err
+		}
+		log.Infof("Label was removed from node %s", kubeNode.GetName())
+	}
+
+	log.Infof("Time to re-reconcile for node %s", kubeNode.GetName())
+	return c.update(kubeNode)
 }
 
+// update is triggered when a node has beed updated on the cluster
 func (c *ctrl) update(kubeNode *corev1.Node) error {
 	affectedNodes := c.collectNodeInfo(c.topology.GetNodeFilter(kubeNode))
 	log.Debug("Affected nodes: %#v", affectedNodes)
@@ -54,7 +58,9 @@ func (c *ctrl) update(kubeNode *corev1.Node) error {
 	return nil
 }
 
+// revertFailedModifications detects prevoius execution failure and tries to revert the applied change
 func (c *ctrl) revertFailedModifications() error {
+	// Iterating on all known nodes
 	for _, kubeNode := range c.kubeNodes {
 		status, ok := c.routeReflectorsUnderOperation[kubeNode.GetUID()]
 		if !ok {
@@ -63,8 +69,10 @@ func (c *ctrl) revertFailedModifications() error {
 		// Node was under operation, better to revert it
 		var err error
 		if status {
+			// Previous operation was add
 			err = c.datastore.RemoveRRStatus(kubeNode, c.findCalicoNode(kubeNode))
 		} else {
+			// Previous operaion was remove
 			err = c.datastore.AddRRStatus(kubeNode, c.findCalicoNode(kubeNode))
 		}
 		if err != nil {
@@ -72,34 +80,26 @@ func (c *ctrl) revertFailedModifications() error {
 			return err
 		}
 
-		log.Infof("Revert route reflector label on %s to %t", kubeNode.GetName(), !status)
-		kubeNode, err := c.k8sNodeClient.Get(context.Background(), kubeNode.GetName(), metav1.GetOptions{})
-		if err != nil {
-			log.Errorf("Unable to fetch kube node %s: %s", kubeNode.GetName(), err.Error())
-			return err
-		}
-
+		// Update Kubernetes node
 		if _, err := c.k8sNodeClient.Update(context.Background(), kubeNode, metav1.UpdateOptions{}); err != nil {
 			log.Errorf("Failed to revert update node %s: %s", kubeNode.GetName(), err.Error())
 			return err
 		}
 
-		err = c.update(kubeNode)
-		if err != nil {
-			log.Errorf("Failed to persist revert node %s: %s", kubeNode.GetName(), err.Error())
-		} else {
-			delete(c.routeReflectorsUnderOperation, kubeNode.GetUID())
-		}
-		return err
+		delete(c.routeReflectorsUnderOperation, kubeNode.GetUID())
 	}
 
 	return nil
 }
 
+// updateNodeLabels calculates topology and updates all the necessary labels in datastore
 func (c *ctrl) updateNodeLabels(affectedNodes map[*corev1.Node]bool) error {
+	// on case of a zone has less nodes then required, count missing
 	missingRouteReflectors := 0
 
+	// Calculate topology
 	for _, status := range c.topology.GetRouteReflectorStatuses(affectedNodes) {
+		// Increment the expected with the number of missing
 		status.ExpectedRRs += missingRouteReflectors
 		log.Infof("Route refletor status in zone(s) %v (actual/expected) = %d/%d", status.Zones, status.ActualRRs, status.ExpectedRRs)
 
@@ -112,24 +112,32 @@ func (c *ctrl) updateNodeLabels(affectedNodes map[*corev1.Node]bool) error {
 				break
 			}
 
-			if diff := status.ExpectedRRs - status.ActualRRs; diff != 0 {
-				if updated, err := c.updateRRStatus(n, diff); err != nil {
-					log.Errorf("Unable to update node %s: %s", n.GetName(), err.Error())
-					return err
-				} else if updated && diff > 0 {
-					status.ActualRRs++
-				} else if updated && diff < 0 {
-					status.ActualRRs--
-				}
+			// Calculate diff to detect scale operation
+			diff := status.ExpectedRRs - status.ActualRRs
+			if diff == 0 {
+				continue
 			}
+
+			// Update labels on node
+			if updated, err := c.updateRRStatus(n, diff); err != nil {
+				log.Errorf("Unable to update node %s: %s", n.GetName(), err.Error())
+				return err
+			} else if updated && diff > 0 {
+				status.ActualRRs++
+			} else if updated && diff < 0 {
+				status.ActualRRs--
+			}
+
 		}
 
+		// Recalculate missing nodes
 		if status.ExpectedRRs != status.ActualRRs {
 			log.Infof("Actual number %d is different than expected %d", status.ActualRRs, status.ExpectedRRs)
 			missingRouteReflectors = status.ExpectedRRs - status.ActualRRs
 		}
 	}
 
+	// There are still missing route reflectors
 	if missingRouteReflectors != 0 {
 		log.Errorf("Actual number is different than expected, missing: %d", missingRouteReflectors)
 	}
@@ -137,12 +145,14 @@ func (c *ctrl) updateNodeLabels(affectedNodes map[*corev1.Node]bool) error {
 	return nil
 }
 
+// updateBGPTopology creates/updates BGP peer configurations based on topology
 func (c *ctrl) updateBGPTopology(affectedNodes map[*corev1.Node]bool) error {
 	bgpPeers := []*apiv3.BGPPeer{}
 	for _, p := range c.bgpPeers {
 		bgpPeers = append(bgpPeers, p)
 	}
 
+	// Generate BGP peers
 	toRefresh, toRemove := c.topology.GenerateBGPPeers(affectedNodes, bgpPeers)
 
 	log.Infof("Number of BGPPeers to refresh: %v", len(toRefresh))
@@ -150,6 +160,7 @@ func (c *ctrl) updateBGPTopology(affectedNodes map[*corev1.Node]bool) error {
 	log.Infof("Number of BGPPeers to delete: %v", len(toRemove))
 	log.Debugf("To delete BGPeers are: %v", toRemove)
 
+	// Persist new/updated peer configs
 	for _, bp := range toRefresh {
 		log.Infof("Saving %s BGPPeer", bp.Name)
 		if err := c.bgpPeer.save(bp); err != nil {
@@ -158,6 +169,7 @@ func (c *ctrl) updateBGPTopology(affectedNodes map[*corev1.Node]bool) error {
 		}
 	}
 
+	// Delete unnecessary peer configs
 	for _, p := range toRemove {
 		log.Debugf("Removing BGPPeer: %s", p.GetName())
 		if err := c.bgpPeer.remove(p); err != nil {
@@ -172,6 +184,7 @@ func (c *ctrl) updateBGPTopology(affectedNodes map[*corev1.Node]bool) error {
 	return nil
 }
 
+// removeRRStatus removes RR labels and persists the new state
 func (c *ctrl) removeRRStatus(kubeNode *corev1.Node) error {
 	c.routeReflectorsUnderOperation[kubeNode.GetUID()] = false
 
@@ -181,6 +194,7 @@ func (c *ctrl) removeRRStatus(kubeNode *corev1.Node) error {
 	}
 
 	log.Infof("Removing route reflector label from %s", kubeNode.GetName())
+	// Update Kubernetes node
 	if _, err := c.k8sNodeClient.Update(context.Background(), kubeNode, metav1.UpdateOptions{}); err != nil {
 		log.Errorf("Unable to cleanup node %s: %s", kubeNode.GetName(), err.Error())
 		return err
@@ -191,14 +205,17 @@ func (c *ctrl) removeRRStatus(kubeNode *corev1.Node) error {
 	return nil
 }
 
+// updateRRStatus applies new RR state on node and persists the state
 func (c *ctrl) updateRRStatus(kubeNode *corev1.Node, diff int) (bool, error) {
 	labeled := c.topology.IsRouteReflector(string(kubeNode.GetUID()), kubeNode.GetLabels())
+	// On case of increasing the number of RR and current is RR || decreasing and current is not RR need to skip
 	if labeled && diff > 0 || !labeled && diff < 0 {
 		return false, nil
 	}
 
 	c.routeReflectorsUnderOperation[kubeNode.GetUID()] = true
 
+	// Remove or add RR labels based on expected number
 	if diff < 0 {
 		if err := c.datastore.RemoveRRStatus(kubeNode, c.findCalicoNode(kubeNode)); err != nil {
 			log.Errorf("Unable to delete RR status %s: %s", kubeNode.GetName(), err.Error())
@@ -213,6 +230,7 @@ func (c *ctrl) updateRRStatus(kubeNode *corev1.Node, diff int) (bool, error) {
 		log.Infof("Adding route reflector label to %s", kubeNode.GetName())
 	}
 
+	// Update Kubernetes node
 	if _, err := c.k8sNodeClient.Update(context.Background(), kubeNode, metav1.UpdateOptions{}); err != nil {
 		log.Errorf("Unable to update node %s: %s", kubeNode.GetName(), err.Error())
 		return false, err
@@ -223,19 +241,26 @@ func (c *ctrl) updateRRStatus(kubeNode *corev1.Node, diff int) (bool, error) {
 	return true, nil
 }
 
+// collectNodeInfo calculate
 func (c *ctrl) collectNodeInfo(filter func(*corev1.Node) bool) (filtered map[*corev1.Node]bool) {
 	filtered = map[*corev1.Node]bool{}
 
 	for k, n := range c.kubeNodes {
 		if filter(n) {
 			n = c.kubeNodes[k]
-			filtered[n] = isNodeReady(n) && isNodeSchedulable(n) && isNodeCompatible(n, c.incompatibleLabels)
+			filtered[n] = c.isNodeCompatible(n)
 		}
 	}
 
 	return
 }
 
+// isNodeCompatible is node good candidate to be RR
+func (c *ctrl) isNodeCompatible(node *corev1.Node) bool {
+	return isNodeReady(node) && isNodeSchedulable(node) && isNodeCompatible(node, c.incompatibleLabels)
+}
+
+// findCalicoNode finds matching pair of a Kubernetes node
 func (c *ctrl) findCalicoNode(kubeNode *corev1.Node) *apiv3.Node {
 	for _, cn := range c.calicoNodes {
 		for _, orchRef := range cn.Spec.OrchRefs {
@@ -247,8 +272,4 @@ func (c *ctrl) findCalicoNode(kubeNode *corev1.Node) *apiv3.Node {
 	}
 
 	return nil
-}
-
-func (c *ctrl) isNodeActive(node *corev1.Node) bool {
-	return isNodeReady(node) && isNodeSchedulable(node) && isNodeCompatible(node, c.incompatibleLabels)
 }

@@ -33,6 +33,7 @@ type calicoNodeSyncer struct {
 	*ctrl
 }
 
+// OnStatusUpdated triggered when Calico node status changed
 func (c *calicoNodeSyncer) OnStatusUpdated(status bapi.SyncStatus) {
 	logrus.Debugf("Route reflector controller Calico node syncer status updated: %s", status)
 
@@ -43,7 +44,9 @@ func (c *calicoNodeSyncer) OnStatusUpdated(status bapi.SyncStatus) {
 	}
 }
 
+// OnStatusUpdated triggered when Calico node updated, this watch updates metadata only
 func (c *calicoNodeSyncer) OnUpdates(updates []bapi.Update) {
+	// One watch must operate at one time
 	c.ctrl.updateMutex.Lock()
 	defer c.ctrl.updateMutex.Unlock()
 
@@ -79,6 +82,7 @@ type bgpPeerSyncer struct {
 	*ctrl
 }
 
+// OnStatusUpdated triggered when BGP peer status changed
 func (c *bgpPeerSyncer) OnStatusUpdated(status bapi.SyncStatus) {
 	logrus.Debugf("Route reflector controller BGP peer syncer status updated: %s", status)
 
@@ -89,7 +93,9 @@ func (c *bgpPeerSyncer) OnStatusUpdated(status bapi.SyncStatus) {
 	}
 }
 
+// OnStatusUpdated triggered when BGP peer updated, this watch updates metadata only
 func (c *bgpPeerSyncer) OnUpdates(updates []bapi.Update) {
+	// One watch must operate at one time
 	c.ctrl.updateMutex.Lock()
 	defer c.ctrl.updateMutex.Unlock()
 
@@ -121,9 +127,12 @@ func (c *bgpPeerSyncer) OnUpdates(updates []bapi.Update) {
 	logrus.Debug("BGP peer cache: %#v", c.bgpPeers)
 }
 
+// OnKubeUpdate triggered when a Kubernetes node was updated
 func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
+	// Wait until Calico nodes and BGP peers are in sync
 	c.waitForSyncOnce.Do(c.waitForSync)
 
+	// One watch must operate at one time
 	c.updateMutex.Lock()
 	defer c.updateMutex.Unlock()
 
@@ -138,12 +147,14 @@ func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
 
 	var err error
 	for n := 1; n <= retries; n++ {
+		// Revert previous modification first
 		if err = c.revertFailedModifications(); err != nil {
 			logrus.Infof("Unable to revert modifications: %s", err)
 			time.Sleep(retrySleepTime)
 			continue
 		}
 
+		// Reconcile update
 		if err = c.update(newKubeNode); err != nil {
 			logrus.Infof("Unable to update Kube node %s: %s", newKubeNode.GetName(), err)
 			time.Sleep(retrySleepTime)
@@ -155,8 +166,10 @@ func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
 }
 
 func (c *ctrl) OnKubeDelete(obj interface{}) {
+	// Wait until Calico nodes and BGP peers are in sync
 	c.waitForSyncOnce.Do(c.waitForSync)
 
+	// One watch must operate at one time
 	c.updateMutex.Lock()
 	defer c.updateMutex.Unlock()
 
@@ -169,12 +182,14 @@ func (c *ctrl) OnKubeDelete(obj interface{}) {
 
 	var err error
 	for n := 1; n <= retries; n++ {
+		// Revert previous modification first
 		if err = c.revertFailedModifications(); err != nil {
 			logrus.Infof("Unable to revert modifications: %s", err)
 			time.Sleep(retrySleepTime)
 			continue
 		}
 
+		// Reconcile delete
 		if err = c.delete(kubeNode); err != nil {
 			logrus.Infof("Unable to delete Kube node %s: %s", kubeNode.GetName(), err)
 			time.Sleep(retrySleepTime)

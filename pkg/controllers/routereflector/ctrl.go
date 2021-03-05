@@ -64,6 +64,8 @@ var notReadyTaints = map[string]bool{
 	"node.cloudprovider.kubernetes.io/uninitialized": false,
 }
 
+// ctrl implements the Controller interface.  It is responsible for monitoring
+// kubernetes nodes, calico nodes, bgp peer configurations and responding to events by auto scaling route reflector topology.
 type ctrl struct {
 	updateMutex      sync.Mutex
 	syncWaitGroup    *sync.WaitGroup
@@ -71,8 +73,8 @@ type ctrl struct {
 	resourceSyncer   bapi.Syncer
 	kubeNodeInformer cache.Controller
 
-	calicoNodeClient client.NodeInterface
-	k8sNodeClient    k8sNodeClient
+	calicoNodeClient calicoClientSpec
+	k8sNodeClient    k8sNodeClientSpec
 
 	kubeNodes   map[types.UID]*corev1.Node
 	calicoNodes map[string]*apiv3.Node
@@ -88,6 +90,7 @@ type ctrl struct {
 	incompatibleLabels map[string]*string
 }
 
+// Run starts and stops the controller
 func (c *ctrl) Run(stopCh chan struct{}) {
 	// Start the BGP peersyncer.
 	go c.resourceSyncer.Start()
@@ -106,7 +109,9 @@ func (c *ctrl) Run(stopCh chan struct{}) {
 	log.Info("Stopping route reflector controller")
 }
 
+// initSyncers is spinning up resource watchers for Kubernetes, Calico nodes and BGP peer configurations
 func (c *ctrl) initSyncers(datastore apiconfig.DatastoreType, client client.Interface, k8sClientset *kubernetes.Clientset) {
+	// There is no option to be sure all Kubernetes nodes are in sync. To increase topology stability operator fetches all nodes to notdestroy existing topology.
 	if kubeNodes, err := k8sClientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{}); err == nil {
 		for _, n := range kubeNodes.Items {
 			kubeNode := n
@@ -118,19 +123,24 @@ func (c *ctrl) initSyncers(datastore apiconfig.DatastoreType, client client.Inte
 		Backend() bapi.Client
 	}
 
+	// Create watch resource for BGP peers
 	watchResources := []watchersyncer.ResourceType{
 		{
 			ListInterface: model.ResourceListOptions{Kind: apiv3.KindBGPPeer},
 		},
 	}
+	c.syncWaitGroup.Add(1)
+
+	// On case of ETCD backend watching Calico node resources also needed
 	if datastore == apiconfig.EtcdV3 {
 		watchResources = append(watchResources, watchersyncer.ResourceType{
 			ListInterface: model.ResourceListOptions{Kind: apiv3.KindNode},
 		})
 		c.syncWaitGroup.Add(1)
 	}
+
+	// Initialize new syncer
 	c.resourceSyncer = watchersyncer.New(client.(accessor).Backend(), watchResources, &bgpPeerSyncer{c})
-	c.syncWaitGroup.Add(1)
 
 	// Create a Node watcher.
 	kubeNodeWatcher := cache.NewListWatchFromClient(k8sClientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())

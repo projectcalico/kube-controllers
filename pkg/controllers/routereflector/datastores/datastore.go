@@ -19,12 +19,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// Datastore defines base functionality if a datastore
 type Datastore interface {
+	// Removes route reflector related annotation and do data store specific extras
 	RemoveRRStatus(*corev1.Node, *apiv3.Node) error
+	// Adds route reflector related annotation and do data store specific extras
 	AddRRStatus(*corev1.Node, *apiv3.Node) error
 }
 
 type nodeInfo interface {
 	GetNodeLabel(string) (string, string)
-	GetClusterID(string, int64) string
+	GetClusterID(*corev1.Node) string
 }

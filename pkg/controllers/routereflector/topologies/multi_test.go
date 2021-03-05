@@ -22,6 +22,7 @@ import (
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 func TestIsRouteReflector(t *testing.T) {
@@ -56,17 +57,17 @@ func TestGetClusterID(t *testing.T) {
 		seed      int64
 		output    string
 	}{
-		{"1.%d.%d.%d", "first0", 1029384756, "1.4.92.165"},
-		{"1.%d.%d.%d", "second0", 1029384756, "1.129.92.165"},
-		{"1.%d.%d.%d", "second0", 1029384757, "1.129.12.192"},
+		{"1.%d.%d.%d", "first0", 1029384756, "1.4.137.21"},
+		{"1.%d.%d.%d", "second0", 1029384756, "1.129.137.21"},
+		{"1.%d.%d.%d", "second0", 1029384757, "1.129.234.195"},
 
-		{"1.%d.%d.%d", "first1", 1234567890, "1.119.237.73"},
-		{"1.%d.%d.%d", "second1", 1234567890, "1.217.237.73"},
-		{"1.%d.%d.%d", "second1", 1234567891, "1.217.33.5"},
+		{"1.%d.%d.%d", "first1", 1234567890, "1.119.52.159"},
+		{"1.%d.%d.%d", "second1", 1234567890, "1.217.52.159"},
+		{"1.%d.%d.%d", "second1", 1234567891, "1.217.66.230"},
 
-		{"1.2.%d.%d", "first2", 1234567890, "1.2.177.237"},
-		{"1.2.%d.%d", "second2", 1234567890, "1.2.188.237"},
-		{"1.2.%d.%d", "second2", 1234567891, "1.2.188.33"},
+		{"1.2.%d.%d", "first2", 1234567890, "1.2.177.52"},
+		{"1.2.%d.%d", "second2", 1234567890, "1.2.188.52"},
+		{"1.2.%d.%d", "second2", 1234567891, "1.2.188.66"},
 
 		{"1.2.3.%d", "first3", 1234567890, "1.2.3.142"},
 		{"1.2.3.%d", "second3", 1234567890, "1.2.3.186"},
@@ -79,7 +80,13 @@ func TestGetClusterID(t *testing.T) {
 				ClusterID: n.clusterID,
 			},
 		}
-		clusterID := topology.GetClusterID(n.ID, n.seed)
+		node := corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				UID:               types.UID(n.ID),
+				CreationTimestamp: metav1.NewTime(time.Unix(n.seed, 0)),
+			},
+		}
+		clusterID := topology.GetClusterID(&node)
 		if clusterID != n.output {
 			t.Errorf("clusterID is wrong for %s %s != %s", n.ID, n.output, clusterID)
 		}
@@ -87,15 +94,24 @@ func TestGetClusterID(t *testing.T) {
 }
 
 func TestGetClusterIDDeterministic(t *testing.T) {
-	clusterID := "1.161.237.73"
+	clusterID := "1.161.52.159"
 	topology := &MultiTopology{
 		Config: Config{
 			ClusterID: "1.%d.%d.%d",
 		},
 	}
 
+	ID := types.UID("ID")
+	cTime := metav1.NewTime(time.Unix(1234567890, 0))
+
 	for i := 0; i < 1000; i++ {
-		actualCluserID := topology.GetClusterID("ID", 1234567890)
+		node := corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				UID:               ID,
+				CreationTimestamp: cTime,
+			},
+		}
+		actualCluserID := topology.GetClusterID(&node)
 		if clusterID != actualCluserID {
 			t.Errorf("clusterID is wrong for %s != %s", actualCluserID, clusterID)
 		}
