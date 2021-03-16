@@ -287,8 +287,8 @@ func selectRRfromZone(rrIndexPerZone map[string]int, rrPerZone map[string][]*cor
 
 // isAlreadySelected detects if RR already selected
 func isAlreadySelected(rrs []*corev1.Node, r *corev1.Node) bool {
-	for i := range rrs {
-		if rrs[i].GetName() == r.GetName() {
+	for _, rr := range rrs {
+		if rr.GetUID() == r.GetUID() {
 			return true
 		}
 	}

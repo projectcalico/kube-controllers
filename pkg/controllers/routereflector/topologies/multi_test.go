@@ -16,6 +16,7 @@ package topologies
 
 import (
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -325,14 +326,13 @@ func TestGetRouteReflectorStatuses(t *testing.T) {
 func TestGenerateBGPPeers(t *testing.T) {
 	now := time.Now()
 
-	data := []struct {
+	data := map[string]struct {
 		nodes         map[*corev1.Node]bool
 		existingPeers []*apiv3.BGPPeer
 		toRefresh     []*apiv3.BGPPeer
 		toDelete      []*apiv3.BGPPeer
 	}{
-		// Empty list, only rrs-to-rrs must be generate
-		{
+		"Empty list, only rrs-to-rrs must be generate": {
 			map[*corev1.Node]bool{},
 			[]*apiv3.BGPPeer{},
 			[]*apiv3.BGPPeer{
@@ -352,8 +352,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 			},
 			[]*apiv3.BGPPeer{},
 		},
-		// Empty list but rrs-to-rrs exists
-		{
+		"Empty list but rrs-to-rrs exists": {
 			map[*corev1.Node]bool{},
 			[]*apiv3.BGPPeer{
 				{
@@ -373,8 +372,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 			[]*apiv3.BGPPeer{},
 			[]*apiv3.BGPPeer{},
 		},
-		// Empty list but rrs-to-rrs different
-		{
+		"Empty list but rrs-to-rrs different": {
 			map[*corev1.Node]bool{},
 			[]*apiv3.BGPPeer{
 				{
@@ -408,8 +406,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 			},
 			[]*apiv3.BGPPeer{},
 		},
-		// Empty list but has existing to delete
-		{
+		"Empty list but has existing to delete": {
 			map[*corev1.Node]bool{},
 			[]*apiv3.BGPPeer{
 				{
@@ -441,8 +438,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 				},
 			},
 		},
-		// Route reflector exists
-		{
+		"Route reflector exists": {
 			map[*corev1.Node]bool{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -451,7 +447,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 							"kubernetes.io/hostname": "node",
 						},
 					},
-				}: false,
+				}: true,
 			},
 			[]*apiv3.BGPPeer{
 				{
@@ -467,25 +463,11 @@ func TestGenerateBGPPeers(t *testing.T) {
 						PeerSelector: "has(rr)",
 					},
 				},
-				{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       apiv3.KindBGPPeer,
-						APIVersion: apiv3.GroupVersionCurrent,
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "peer-to-rrs-1556604621-uid",
-					},
-					Spec: apiv3.BGPPeerSpec{
-						NodeSelector: "kubernetes.io/hostname=='node'",
-						PeerSelector: "rr=='1556604621'",
-					},
-				},
 			},
 			[]*apiv3.BGPPeer{},
 			[]*apiv3.BGPPeer{},
 		},
-		// One route reflector node
-		{
+		"One route reflector node": {
 			map[*corev1.Node]bool{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -494,7 +476,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 							"rr": "",
 						},
 					},
-				}: false,
+				}: true,
 			},
 			[]*apiv3.BGPPeer{},
 			[]*apiv3.BGPPeer{
@@ -514,9 +496,17 @@ func TestGenerateBGPPeers(t *testing.T) {
 			},
 			[]*apiv3.BGPPeer{},
 		},
-		// One node one route reflector single zone
-		{
+		"One node one route reflector single zone": {
 			map[*corev1.Node]bool{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						UID: "rrid",
+						Labels: map[string]string{
+							"rr":                     "4117807680",
+							"kubernetes.io/hostname": "rr",
+						},
+					},
+				}: true,
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						UID: "uid",
@@ -524,7 +514,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 							"kubernetes.io/hostname": "node",
 						},
 					},
-				}: false,
+				}: true,
 			},
 			[]*apiv3.BGPPeer{},
 			[]*apiv3.BGPPeer{
@@ -547,19 +537,51 @@ func TestGenerateBGPPeers(t *testing.T) {
 						APIVersion: apiv3.GroupVersionCurrent,
 					},
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "peer-to-rrs-2166136261-uid",
+						Name: "peer-to-rrs-4117807680-uid",
 					},
 					Spec: apiv3.BGPPeerSpec{
 						NodeSelector: "kubernetes.io/hostname=='node'",
-						PeerSelector: "rr=='2166136261'",
+						PeerSelector: "rr=='4117807680'",
 					},
 				},
 			},
 			[]*apiv3.BGPPeer{},
 		},
-		// Three node three route reflector multi zone
-		{
+		"Three node three route reflector multi zone": {
 			map[*corev1.Node]bool{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						CreationTimestamp: metav1.NewTime(now),
+						UID:               "rrid",
+						Labels: map[string]string{
+							"zone":                   "a",
+							"kubernetes.io/hostname": "rr",
+							"rr":                     "4158539682",
+						},
+					},
+				}: true,
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						CreationTimestamp: metav1.NewTime(now.Add(time.Second)),
+						UID:               "rrid2",
+						Labels: map[string]string{
+							"zone":                   "b",
+							"kubernetes.io/hostname": "rr2",
+							"rr":                     "4175317301",
+						},
+					},
+				}: true,
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						CreationTimestamp: metav1.NewTime(now.Add(time.Second)),
+						UID:               "rrid3",
+						Labels: map[string]string{
+							"zone":                   "c",
+							"kubernetes.io/hostname": "rr3",
+							"rr":                     "1556604621",
+						},
+					},
+				}: true,
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						CreationTimestamp: metav1.NewTime(now),
@@ -569,7 +591,7 @@ func TestGenerateBGPPeers(t *testing.T) {
 							"kubernetes.io/hostname": "node",
 						},
 					},
-				}: false,
+				}: true,
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						CreationTimestamp: metav1.NewTime(now.Add(time.Second)),
@@ -579,7 +601,17 @@ func TestGenerateBGPPeers(t *testing.T) {
 							"kubernetes.io/hostname": "node2",
 						},
 					},
-				}: false,
+				}: true,
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						CreationTimestamp: metav1.NewTime(now.Add(time.Second)),
+						UID:               "uid3",
+						Labels: map[string]string{
+							"zone":                   "c",
+							"kubernetes.io/hostname": "node3",
+						},
+					},
+				}: true,
 			},
 			[]*apiv3.BGPPeer{},
 			[]*apiv3.BGPPeer{
@@ -602,11 +634,11 @@ func TestGenerateBGPPeers(t *testing.T) {
 						APIVersion: apiv3.GroupVersionCurrent,
 					},
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "peer-to-rrs-4158539682-uid",
+						Name: "peer-to-rrs-3531741558-uid",
 					},
 					Spec: apiv3.BGPPeerSpec{
 						NodeSelector: "kubernetes.io/hostname=='node'",
-						PeerSelector: "rr=='4158539682'",
+						PeerSelector: "rr=='3531741558'",
 					},
 				},
 				{
@@ -615,11 +647,37 @@ func TestGenerateBGPPeers(t *testing.T) {
 						APIVersion: apiv3.GroupVersionCurrent,
 					},
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "peer-to-rrs-4175317301-uid",
+						Name: "peer-to-rrs-3531741558-uid2",
+					},
+					Spec: apiv3.BGPPeerSpec{
+						NodeSelector: "kubernetes.io/hostname=='node2'",
+						PeerSelector: "rr=='3531741558'",
+					},
+				},
+				{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       apiv3.KindBGPPeer,
+						APIVersion: apiv3.GroupVersionCurrent,
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "peer-to-rrs-3531741558-uid3",
+					},
+					Spec: apiv3.BGPPeerSpec{
+						NodeSelector: "kubernetes.io/hostname=='node3'",
+						PeerSelector: "rr=='3531741558'",
+					},
+				},
+				{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       apiv3.KindBGPPeer,
+						APIVersion: apiv3.GroupVersionCurrent,
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "peer-to-rrs-3548519177-uid",
 					},
 					Spec: apiv3.BGPPeerSpec{
 						NodeSelector: "kubernetes.io/hostname=='node'",
-						PeerSelector: "rr=='4175317301'",
+						PeerSelector: "rr=='3548519177'",
 					},
 				},
 				{
@@ -628,11 +686,37 @@ func TestGenerateBGPPeers(t *testing.T) {
 						APIVersion: apiv3.GroupVersionCurrent,
 					},
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "peer-to-rrs-1556604621-uid",
+						Name: "peer-to-rrs-3548519177-uid2",
+					},
+					Spec: apiv3.BGPPeerSpec{
+						NodeSelector: "kubernetes.io/hostname=='node2'",
+						PeerSelector: "rr=='3548519177'",
+					},
+				},
+				{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       apiv3.KindBGPPeer,
+						APIVersion: apiv3.GroupVersionCurrent,
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "peer-to-rrs-3548519177-uid3",
+					},
+					Spec: apiv3.BGPPeerSpec{
+						NodeSelector: "kubernetes.io/hostname=='node3'",
+						PeerSelector: "rr=='3548519177'",
+					},
+				},
+				{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       apiv3.KindBGPPeer,
+						APIVersion: apiv3.GroupVersionCurrent,
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "peer-to-rrs-4117807680-uid",
 					},
 					Spec: apiv3.BGPPeerSpec{
 						NodeSelector: "kubernetes.io/hostname=='node'",
-						PeerSelector: "rr=='1556604621'",
+						PeerSelector: "rr=='4117807680'",
 					},
 				},
 				{
@@ -641,11 +725,11 @@ func TestGenerateBGPPeers(t *testing.T) {
 						APIVersion: apiv3.GroupVersionCurrent,
 					},
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "peer-to-rrs-4175317301-uid2",
+						Name: "peer-to-rrs-4117807680-uid2",
 					},
 					Spec: apiv3.BGPPeerSpec{
 						NodeSelector: "kubernetes.io/hostname=='node2'",
-						PeerSelector: "rr=='4175317301'",
+						PeerSelector: "rr=='4117807680'",
 					},
 				},
 				{
@@ -654,24 +738,11 @@ func TestGenerateBGPPeers(t *testing.T) {
 						APIVersion: apiv3.GroupVersionCurrent,
 					},
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "peer-to-rrs-1556604621-uid2",
+						Name: "peer-to-rrs-4117807680-uid3",
 					},
 					Spec: apiv3.BGPPeerSpec{
-						NodeSelector: "kubernetes.io/hostname=='node2'",
-						PeerSelector: "rr=='1556604621'",
-					},
-				},
-				{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       apiv3.KindBGPPeer,
-						APIVersion: apiv3.GroupVersionCurrent,
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "peer-to-rrs-4158539682-uid2",
-					},
-					Spec: apiv3.BGPPeerSpec{
-						NodeSelector: "kubernetes.io/hostname=='node2'",
-						PeerSelector: "rr=='4158539682'",
+						NodeSelector: "kubernetes.io/hostname=='node3'",
+						PeerSelector: "rr=='4117807680'",
 					},
 				},
 			},
@@ -679,25 +750,36 @@ func TestGenerateBGPPeers(t *testing.T) {
 		},
 	}
 
-	for x, d := range data {
-		config := Config{
-			NodeLabelKey: "rr",
-			ZoneLabel:    "zone",
-		}
-		topology := &MultiTopology{
-			Config: config,
-			single: SingleTopology{
+	for name, d := range data {
+		t.Run(name, func(t *testing.T) {
+			config := Config{
+				NodeLabelKey:      "rr",
+				ZoneLabel:         "zone",
+				ReflectorsPerNode: 3,
+			}
+			topology := &MultiTopology{
 				Config: config,
-			},
-		}
+				single: SingleTopology{
+					Config: config,
+				},
+			}
 
-		toRefresh, toDelete := topology.GenerateBGPPeers(d.nodes, d.existingPeers)
+			toRefresh, toDelete := topology.GenerateBGPPeers(d.nodes, d.existingPeers)
 
-		if fmt.Sprintf("%v", toRefresh) != fmt.Sprintf("%v", d.toRefresh) {
-			t.Errorf("To refresh is wrong at %d %v \n!=\n %v", x, toRefresh, d.toRefresh)
-		}
-		if fmt.Sprintf("%v", toDelete) != fmt.Sprintf("%v", d.toDelete) {
-			t.Errorf("To delete is wrong at %d %v \n!=\n %v", x, toDelete, d.toDelete)
-		}
+			mapToName := func(i []*apiv3.BGPPeer) (o []string) {
+				for _, s := range i {
+					o = append(o, s.GetName())
+				}
+				sort.Strings(o)
+				return
+			}
+
+			if fmt.Sprintf("%v", mapToName(toRefresh)) != fmt.Sprintf("%v", mapToName(d.toRefresh)) {
+				t.Errorf("To refresh is wrong %v \n!=\n %v", mapToName(d.toRefresh), mapToName(toRefresh))
+			}
+			if fmt.Sprintf("%v", mapToName(toDelete)) != fmt.Sprintf("%v", mapToName(d.toDelete)) {
+				t.Errorf("To delete is wrong %v \n!=\n %v", mapToName(d.toDelete), mapToName(toDelete))
+			}
+		})
 	}
 }
