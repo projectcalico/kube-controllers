@@ -162,6 +162,8 @@ func (c *ctrl) OnKubeUpdate(oldObj interface{}, newObj interface{}) {
 		}
 		return
 	}
+
+	rrErrorCounter.WithLabelValues(newKubeNode.GetName()).Inc()
 	logrus.Errorf("Unable to update Kube node %s: %s", newKubeNode.GetName(), err)
 }
 
@@ -198,6 +200,8 @@ func (c *ctrl) OnKubeDelete(obj interface{}) {
 		delete(c.kubeNodes, kubeNode.GetUID())
 		return
 	}
+
+	rrErrorCounter.WithLabelValues(kubeNode.GetName()).Inc()
 	logrus.Errorf("Unable to delete Kube node %s: %s", kubeNode.GetName(), err)
 }
 

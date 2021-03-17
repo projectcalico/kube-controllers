@@ -27,6 +27,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/backend/watchersyncer"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
 	corev1 "k8s.io/api/core/v1"
@@ -64,6 +65,51 @@ var notReadyTaints = map[string]bool{
 	"node.cloudprovider.kubernetes.io/uninitialized": false,
 }
 
+var (
+	rrRevertCounter *prometheus.CounterVec
+	rrCountGauge    prometheus.Gauge
+	rrBGPUpdGauge   *prometheus.GaugeVec
+	rrMissingGauge  prometheus.Gauge
+	rrErrorCounter  *prometheus.CounterVec
+)
+
+func registerPrometheusMetrics() {
+	// Number of revert operations in controller
+	rrRevertCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "route_reflector_revert_count",
+		Help: "total number of reverts in controller per node",
+	}, []string{"node"})
+	prometheus.MustRegister(rrRevertCounter)
+
+	// Number of route reflectors.
+	rrCountGauge = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "route_reflector_total_count",
+		Help: "total number of route reflectors",
+	})
+	prometheus.MustRegister(rrCountGauge)
+
+	// BGP API operations by type
+	rrBGPUpdGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "route_reflector_bgp_updated",
+		Help: "BGP pper config updates per type",
+	}, []string{"operation"})
+	prometheus.MustRegister(rrBGPUpdGauge)
+
+	// Number of missing route reflectors.
+	rrMissingGauge = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "route_reflector_total_missing_count",
+		Help: "total number of missing route reflectors",
+	})
+	prometheus.MustRegister(rrMissingGauge)
+
+	// Number of errors in controller
+	rrErrorCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "route_reflector_error_count",
+		Help: "total number of errors in controller per node",
+	}, []string{"node"})
+	prometheus.MustRegister(rrErrorCounter)
+}
+
 // ctrl implements the Controller interface.  It is responsible for monitoring
 // kubernetes nodes, calico nodes, bgp peer configurations and responding to events by auto scaling route reflector topology.
 type ctrl struct {
@@ -92,6 +138,8 @@ type ctrl struct {
 
 // Run starts and stops the controller
 func (c *ctrl) Run(stopCh chan struct{}) {
+	registerPrometheusMetrics()
+
 	// Start the BGP peersyncer.
 	go c.resourceSyncer.Start()
 

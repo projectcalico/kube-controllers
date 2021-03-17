@@ -66,6 +66,9 @@ func (c *ctrl) revertFailedModifications() error {
 		if !ok {
 			continue
 		}
+
+		rrRevertCounter.WithLabelValues(kubeNode.GetName()).Inc()
+
 		// Node was under operation, better to revert it
 		var err error
 		if status {
@@ -139,6 +142,7 @@ func (c *ctrl) updateNodeLabels(affectedNodes map[*corev1.Node]bool) error {
 
 	// There are still missing route reflectors
 	if missingRouteReflectors != 0 {
+		rrMissingGauge.Set(float64(missingRouteReflectors))
 		log.Errorf("Actual number is different than expected, missing: %d", missingRouteReflectors)
 	}
 
@@ -160,6 +164,10 @@ func (c *ctrl) updateBGPTopology(affectedNodes map[*corev1.Node]bool) error {
 	log.Infof("Number of BGPPeers to delete: %v", len(toRemove))
 	log.Debugf("To delete BGPeers are: %v", toRemove)
 
+	if len(toRefresh) > 0 {
+		rrBGPUpdGauge.Reset()
+		rrBGPUpdGauge.WithLabelValues("update").Set(float64(len(toRefresh)))
+	}
 	// Persist new/updated peer configs
 	for _, bp := range toRefresh {
 		log.Infof("Saving %s BGPPeer", bp.Name)
@@ -169,6 +177,10 @@ func (c *ctrl) updateBGPTopology(affectedNodes map[*corev1.Node]bool) error {
 		}
 	}
 
+	if len(toRemove) > 0 {
+		rrBGPUpdGauge.Reset()
+		rrBGPUpdGauge.WithLabelValues("delete").Set(float64(len(toRemove)))
+	}
 	// Delete unnecessary peer configs
 	for _, p := range toRemove {
 		log.Debugf("Removing BGPPeer: %s", p.GetName())
@@ -201,6 +213,8 @@ func (c *ctrl) removeRRStatus(kubeNode *corev1.Node) error {
 	}
 
 	delete(c.routeReflectorsUnderOperation, kubeNode.GetUID())
+
+	rrCountGauge.Dec()
 
 	return nil
 }
@@ -237,6 +251,12 @@ func (c *ctrl) updateRRStatus(kubeNode *corev1.Node, diff int) (bool, error) {
 	}
 
 	delete(c.routeReflectorsUnderOperation, kubeNode.GetUID())
+
+	if diff < 0 {
+		rrCountGauge.Dec()
+	} else {
+		rrCountGauge.Inc()
+	}
 
 	return true, nil
 }
