@@ -84,14 +84,14 @@ func registerPrometheusMetrics() {
 	// Number of route reflectors.
 	rrCountGauge = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "route_reflector_total_count",
-		Help: "total number of route reflectors",
+		Help: "actual number of route reflectors",
 	})
 	prometheus.MustRegister(rrCountGauge)
 
 	// BGP API operations by type
 	rrBGPUpdGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "route_reflector_bgp_updated",
-		Help: "BGP pper config updates per type",
+		Help: "BGP peer config operations per type",
 	}, []string{"operation"})
 	prometheus.MustRegister(rrBGPUpdGauge)
 
