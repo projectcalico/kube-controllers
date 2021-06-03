@@ -68,6 +68,10 @@ type NodeController struct {
 	config       config.NodeControllerConfig
 	nodeCache    map[string]*api.Node
 	syncStatus   bapi.SyncStatus
+
+	// For tracking IP leak status.
+	confirmedLeaks map[string]time.Time
+	leakCandidates map[string]time.Time
 }
 
 // NewNodeController Constructor for NodeController
@@ -169,20 +173,28 @@ func (c *NodeController) Run(stopCh chan struct{}) {
 // acceptScheduleRequests monitors the schedule channel for kicks to wake up
 // and schedule syncs.
 func (c *NodeController) acceptScheduleRequests(stopCh <-chan struct{}) {
+	t := time.NewTicker(5 * time.Minute)
 	for {
 		// Wait until something wakes us up, or we are stopped
 		select {
-		case <-c.schedule:
-			err := c.syncDelete()
+		case <-t.C:
+			// Periodic IPAM check in case nothing is changing.
+			err := c.syncIPAMCleanup()
 			if err != nil {
-				// Reschedule the sync since we hit an error. Note that
-				// syncDelete() does its own rate limiting, so it's fine to
-				// reschedule immediately.
-				kick(c.schedule)
+				log.WithError(err).Warnf("Error in periodic IPAM checkup")
 			}
+		case <-c.schedule:
+			// TODO: Reinstate node deletion handling.
+			// err := c.syncDelete()
+			// if err != nil {
+			// 	// Reschedule the sync since we hit an error. Note that
+			// 	// syncDelete() does its own rate limiting, so it's fine to
+			// 	// reschedule immediately.
+			// 	kick(c.schedule)
+			//			}
 		case <-c.blockUpdate:
-			// Gather IPAM data for metrics.
-			_, err := c.gatherIPAMData()
+			// This checks for leaks and also updates IPAM data for metrics.
+			err := c.syncIPAMCleanup()
 			if err != nil {
 				log.WithError(err).Warn("error gathering IPAM data")
 			}
