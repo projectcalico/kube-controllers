@@ -16,14 +16,12 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	log "github.com/sirupsen/logrus"
 
-	v1 "k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -66,91 +64,4 @@ func (c *NodeController) syncDeleteEtcd() error {
 		}
 	}
 	return nil
-}
-
-// syncNodeLabels syncs the labels found in v1.Node to the Calico node object.
-// It uses an annotation on the Calico node object to keep track of which labels have
-// been synced from Kubernetes, so that it doesn't overwrite user provided labels (e.g.,
-// via calicoctl or another Calico controller).
-func (nc *NodeController) syncNodeLabels(node *v1.Node) {
-	// On failure, we retry a certain number of times.
-	for n := 1; n < 5; n++ {
-		// Get the Calico node representation.
-		name, ok := nc.getCalicoNode(node.Name)
-		if !ok {
-			// We havent learned this Calico node yet.
-			log.Debugf("Skipping update for node with no Calico equivalent")
-			return
-		}
-		calNode, err := nc.calicoClient.Nodes().Get(context.Background(), name, options.GetOptions{})
-		if err != nil {
-			log.WithError(err).Warnf("Failed to get node, retrying")
-			time.Sleep(retrySleepTime)
-			continue
-		}
-		if calNode.Labels == nil {
-			calNode.Labels = map[string]string{}
-		}
-		if calNode.Annotations == nil {
-			calNode.Annotations = map[string]string{}
-		}
-
-		// Track if we need to perform an update.
-		needsUpdate := false
-
-		// Check if it has the annotation for k8s labels.
-
-		// If there are labels present, then parse them. Otherwise this is
-		// a first-time sync, in which case there are no old labels.
-		oldLabels := map[string]string{}
-		if a, ok := calNode.Annotations[nodeLabelAnnotation]; ok {
-			if err = json.Unmarshal([]byte(a), &oldLabels); err != nil {
-				log.WithError(err).Error("Failed to unmarshal node labels")
-				return
-			}
-		}
-		log.Debugf("Determined previously synced labels: %s", oldLabels)
-
-		// We've synced labels before. Determine diffs to apply.
-		// For each k/v in node.Labels, if it isn't present or the value
-		// differs, add it to the node.
-		for k, v := range node.Labels {
-			if v2, ok := calNode.Labels[k]; !ok || v != v2 {
-				log.Debugf("Adding node label %s=%s", k, v)
-				calNode.Labels[k] = v
-				needsUpdate = true
-			}
-		}
-
-		// For each k/v that used to be in the k8s node labels, but is no longer,
-		// remove it from the Calico node.
-		for k, v := range oldLabels {
-			if _, ok := node.Labels[k]; !ok {
-				// The old label is no longer present. Remove it.
-				log.Debugf("Deleting node label %s=%s", k, v)
-				delete(calNode.Labels, k)
-				needsUpdate = true
-			}
-		}
-
-		// Set the annotation to the correct values.
-		bytes, err := json.Marshal(node.Labels)
-		if err != nil {
-			log.WithError(err).Errorf("Error marshalling node labels")
-			return
-		}
-		calNode.Annotations[nodeLabelAnnotation] = string(bytes)
-
-		// Update the node in the datastore.
-		if needsUpdate {
-			if _, err := nc.calicoClient.Nodes().Update(context.Background(), calNode, options.SetOptions{}); err != nil {
-				log.WithError(err).Warnf("Failed to update node, retrying")
-				time.Sleep(retrySleepTime)
-				continue
-			}
-			log.WithField("node", node.ObjectMeta.Name).Info("Successfully synced node labels")
-		}
-		return
-	}
-	log.Errorf("Too many retries when updating node")
 }

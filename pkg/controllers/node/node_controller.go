@@ -16,7 +16,6 @@ package node
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -25,13 +24,10 @@ import (
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/workqueue"
 
 	"github.com/projectcalico/kube-controllers/pkg/config"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/controller"
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 )
 
@@ -53,23 +49,22 @@ var (
 // NodeController implements the Controller interface.  It is responsible for monitoring
 // kubernetes nodes and responding to delete events by removing them from the Calico datastore.
 type NodeController struct {
-	sync.Mutex
-	ctx          context.Context
+	ctx    context.Context
+	config config.NodeControllerConfig
+
+	// For syncing node objects from the k8s API.
 	informer     cache.Controller
 	indexer      cache.Indexer
-	calicoClient client.Interface
 	k8sClientset *kubernetes.Clientset
-	rl           workqueue.RateLimiter
-	schedule     chan interface{}
-	blockUpdate  chan interface{}
-	nodemapper   map[string]string
-	allBlocks    map[string]model.KVPair
-	syncer       bapi.Syncer
-	config       config.NodeControllerConfig
-	nodeCache    map[string]*api.Node
-	syncStatus   bapi.SyncStatus
 
-	// For tracking IP leak status.
+	// For accessing Calico datastore.
+	calicoClient client.Interface
+	dataFeed     *DataFeed
+
+	schedule    chan interface{}
+	blockUpdate chan interface{}
+
+	// WIP: For tracking IP leak status.
 	confirmedLeaks map[string]time.Time
 	leakCandidates map[string]time.Time
 }
@@ -80,11 +75,8 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 		ctx:          ctx,
 		calicoClient: calicoClient,
 		k8sClientset: k8sClientset,
-		rl:           workqueue.DefaultControllerRateLimiter(),
-		nodemapper:   map[string]string{},
-		allBlocks:    map[string]model.KVPair{},
 		config:       cfg,
-		nodeCache:    make(map[string]*api.Node),
+		dataFeed:     NewDataFeed(calicoClient),
 	}
 
 	// channel used to kick the controller into scheduling a sync. It has length
@@ -104,27 +96,32 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 			kick(nc.schedule)
 		}}
 
-	// Note that the configuration code has already handled disabling this if
-	// we are in KDD mode.
+	// Create the Auto HostEndpoint sub-controller and register it to receive data.
+	// We always launch this controller, even if auto-HEPs are disabled, since the controller
+	// is responsible for cleaning up after itself in case it was previously enabled.
+	autoHEPController := NewAuthoHEPController(cfg, calicoClient)
+	autoHEPController.RegisterWith(nc.dataFeed)
+
 	if cfg.SyncLabels {
-		// Add handlers for node add/update events from k8s.
-		handlers.AddFunc = func(obj interface{}) {
-			nc.syncNodeLabels(obj.(*v1.Node))
-		}
-		handlers.UpdateFunc = func(_, obj interface{}) {
-			nc.syncNodeLabels(obj.(*v1.Node))
-		}
+		// Note that the configuration code has already handled disabling this if
+		// we are in KDD mode.
+
+		// Create Label-sync controller and register it to receive data.
+		nodeLabelCtrl := NewNodeLabelController(calicoClient)
+		nodeLabelCtrl.RegisterWith(nc.dataFeed)
+
+		// Hook the node label controller into the node informer so we are notified
+		// when Kubernetes node labels change.
+		handlers.AddFunc = func(obj interface{}) { nodeLabelCtrl.OnKubernetesNodeUpdate(obj) }
+		handlers.UpdateFunc = func(_, obj interface{}) { nodeLabelCtrl.OnKubernetesNodeUpdate(obj) }
 	}
 
 	// Informer handles managing the watch and signals us when nodes are deleted.
 	// also syncs up labels between k8s/calico node objects
 	nc.indexer, nc.informer = cache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, handlers, cache.Indexers{})
 
-	// Start the syncer. We always need to run this to manage auto
-	// hostendpoints: if autoHostEndpoints was enabled then disabled later on
-	// then we need to remove the leftover auto heps.
-	nc.initSyncer()
-	nc.syncer.Start()
+	// Start the Calico data feed.
+	nc.dataFeed.Start()
 
 	return nc
 }
