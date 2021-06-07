@@ -16,7 +16,6 @@ package node
 
 import (
 	"reflect"
-	"sync"
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
@@ -52,8 +51,6 @@ func NewDataFeed(c client.Interface) *DataFeed {
 }
 
 type DataFeed struct {
-	// TODO: Don't rely on Mutex for safe data access.
-	sync.Mutex
 	syncer bapi.Syncer
 
 	// Registrations
@@ -71,22 +68,10 @@ func (d *DataFeed) RegisterForSyncStatus(h StatusHandler) {
 
 // RegisterForNotification registers a channel to receive an update when the given kind receives an update.
 // kind should be a pointer to the struct type received over the syncer.
-func (d *DataFeed) RegisterForNotification(kind interface{}, h UpdateHandler) {
-	d.registrations[kind] = append(d.registrations[kind], h)
+func (d *DataFeed) RegisterForNotification(key model.Key, h UpdateHandler) {
+	kType := reflect.TypeOf(key)
+	d.registrations[kType] = append(d.registrations[kType], h)
 }
-
-// // listBlocks returns the full set of IPAM blocks from the controller's cache, as populated by the syncer.
-// func (c *DataFeed) listBlocks() (map[string]model.KVPair, error) {
-// 	c.Lock()
-// 	defer c.Unlock()
-
-// 	// Make a copy of the blocks map to return.
-// 	blocks := make(map[string]model.KVPair, len(c.allBlocks))
-// 	for k, v := range c.allBlocks {
-// 		blocks[k] = v
-// 	}
-// 	return blocks, nil
-// }
 
 func (d *DataFeed) OnStatusUpdated(status bapi.SyncStatus) {
 	logrus.Infof("Node controller syncer status updated: %s", status)
@@ -108,34 +93,5 @@ func (c DataFeed) onUpdate(update bapi.Update) {
 	// For each consumer registered for this type, send an update.
 	for _, f := range c.registrations[t] {
 		f(update)
-	}
-}
-
-func (c *DataFeed) OnUpdatesOld(updates []bapi.Update) {
-	logrus.Debugf("Node controller syncer received updates: %#v", updates)
-	for _, upd := range updates {
-		switch upd.UpdateType {
-		case bapi.UpdateTypeKVNew:
-			fallthrough
-
-		case bapi.UpdateTypeKVUpdated:
-			switch upd.KVPair.Value.(type) {
-			case *model.AllocationBlock:
-				c.Lock()
-				c.allBlocks[upd.Key.(model.BlockKey).CIDR.String()] = upd.KVPair
-				c.Unlock()
-				kick(c.blockUpdate)
-			}
-		case bapi.UpdateTypeKVDeleted:
-			switch upd.KVPair.Key.(type) {
-			case model.BlockKey:
-				c.Lock()
-				delete(c.allBlocks, upd.Key.(model.BlockKey).CIDR.String())
-				c.Unlock()
-				kick(c.blockUpdate)
-			}
-		default:
-			logrus.Errorf("Unhandled update type")
-		}
 	}
 }
