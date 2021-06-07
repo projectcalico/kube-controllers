@@ -49,8 +49,7 @@ var (
 // NodeController implements the Controller interface.  It is responsible for monitoring
 // kubernetes nodes and responding to delete events by removing them from the Calico datastore.
 type NodeController struct {
-	ctx    context.Context
-	config config.NodeControllerConfig
+	ctx context.Context
 
 	// For syncing node objects from the k8s API.
 	informer     cache.Controller
@@ -61,12 +60,8 @@ type NodeController struct {
 	calicoClient client.Interface
 	dataFeed     *DataFeed
 
-	schedule    chan interface{}
-	blockUpdate chan interface{}
-
-	// WIP: For tracking IP leak status.
-	confirmedLeaks map[string]time.Time
-	leakCandidates map[string]time.Time
+	// Sub-controllers
+	ipamCtrl *ipamController
 }
 
 // NewNodeController Constructor for NodeController
@@ -75,25 +70,20 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 		ctx:          ctx,
 		calicoClient: calicoClient,
 		k8sClientset: k8sClientset,
-		config:       cfg,
 		dataFeed:     NewDataFeed(calicoClient),
 	}
-
-	// channel used to kick the controller into scheduling a sync. It has length
-	// 1 so that we coalesce multiple kicks while a sync is happening down to
-	// just one additional sync.
-	nc.schedule = make(chan interface{}, 1)
-	nc.blockUpdate = make(chan interface{}, 1)
 
 	// Create a Node watcher.
 	listWatcher := cache.NewListWatchFromClient(k8sClientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())
 
+	// Create the IPAM controller.
+	nc.ipamCtrl = NewIPAMController(cfg, calicoClient, k8sClientset)
+	nc.ipamCtrl.RegisterWith(nc.dataFeed)
+
 	// Setup event handlers
 	handlers := cache.ResourceEventHandlerFuncs{
 		DeleteFunc: func(obj interface{}) {
-			// Just kick controller to wake up and perform a sync. No need to bother what node it was
-			// as we sync everything.
-			kick(nc.schedule)
+			nc.ipamCtrl.OnKubernetesNodeDeleted()
 		}}
 
 	// Create the Auto HostEndpoint sub-controller and register it to receive data.
@@ -154,69 +144,11 @@ func (c *NodeController) Run(stopCh chan struct{}) {
 	}
 	log.Debug("Finished syncing with Kubernetes API (Nodes)")
 
-	// Start worker thread.
-	go c.acceptScheduleRequests(stopCh)
-
-	log.Info("Node controller is now running")
-
-	// Kick off a start of day sync. Write non-blocking so that if a sync is
-	// already scheduled, we don't schedule another.
-	kick(c.schedule)
+	// We're in-sync. Start the sub-controllers.
+	c.ipamCtrl.Start(stopCh)
 
 	<-stopCh
 	log.Info("Stopping Node controller")
-}
-
-// acceptScheduleRequests monitors the schedule channel for kicks to wake up
-// and schedule syncs.
-func (c *NodeController) acceptScheduleRequests(stopCh <-chan struct{}) {
-	t := time.NewTicker(5 * time.Minute)
-	for {
-		// Wait until something wakes us up, or we are stopped
-		select {
-		case <-t.C:
-			// Periodic IPAM check in case nothing is changing.
-			err := c.syncIPAMCleanup()
-			if err != nil {
-				log.WithError(err).Warnf("Error in periodic IPAM checkup")
-			}
-		case <-c.schedule:
-			// TODO: Reinstate node deletion handling.
-			// err := c.syncDelete()
-			// if err != nil {
-			// 	// Reschedule the sync since we hit an error. Note that
-			// 	// syncDelete() does its own rate limiting, so it's fine to
-			// 	// reschedule immediately.
-			// 	kick(c.schedule)
-			//			}
-		case <-c.blockUpdate:
-			// This checks for leaks and also updates IPAM data for metrics.
-			err := c.syncIPAMCleanup()
-			if err != nil {
-				log.WithError(err).Warn("error gathering IPAM data")
-			}
-		case <-stopCh:
-			return
-		}
-	}
-}
-
-func (c *NodeController) syncDelete() error {
-	// First, try doing an IPAM sync. This will check IPAM state and clean up any blocks
-	// which don't belong based on nodes/pods in the k8s API. Don't return the error right away, since
-	// even if this IPAM sync fails we shouldn't block cleaning up the node object. If we do encounter an error,
-	// we'll return it after we're done.
-	err := c.syncIPAMCleanup()
-	if c.config.DeleteNodes {
-		// If we're running in etcd mode, then we also need to delete the node resource.
-		// We don't need this for KDD mode, since the Calico Node resource is backed
-		// directly by the Kubernetes Node resource, so their lifecycle is identical.
-		errEtcd := c.syncDeleteEtcd()
-		if errEtcd != nil {
-			return errEtcd
-		}
-	}
-	return err
 }
 
 // kick puts an item on the channel in non-blocking write. This means if there

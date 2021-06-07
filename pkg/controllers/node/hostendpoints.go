@@ -40,6 +40,7 @@ func NewAuthoHEPController(c config.NodeControllerConfig, client client.Interfac
 	ctrl := &autoHostEndpointController{
 		rl:     workqueue.DefaultControllerRateLimiter(),
 		config: c,
+		client: client,
 	}
 	return ctrl
 }
