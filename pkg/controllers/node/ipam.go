@@ -78,9 +78,6 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs *
 		allBlocks:          make(map[string]model.KVPair),
 		allocationsByBlock: make(map[string]map[string]*allocation),
 		allocationsByNode:  make(map[string]map[string]*allocation),
-
-		blocksByNode:      make(map[string]int),
-		borrowedIPsByNode: make(map[string]int),
 	}
 
 }
@@ -123,10 +120,6 @@ type ipamController struct {
 	// Store allocations broken out from the raw blocks by their handle.
 	allocationsByBlock map[string]map[string]*allocation
 	allocationsByNode  map[string]map[string]*allocation
-
-	// Keep track of various counts so that we can report them as metrics.
-	blocksByNode      map[string]int
-	borrowedIPsByNode map[string]int
 }
 
 func (c *ipamController) Start(stop chan struct{}) {
@@ -378,7 +371,9 @@ func (c *ipamController) updateMetrics() error {
 	// Update prometheus metrics.
 	ipsGauge.Reset()
 	for node, allocations := range c.allocationsByNode {
-		ipsGauge.WithLabelValues(node).Set(float64(len(allocations)))
+		if num := len(allocations); num != 0 {
+			ipsGauge.WithLabelValues(node).Set(float64(num))
+		}
 	}
 	blocksGauge.Reset()
 	for node, num := range blocksByNode {
@@ -389,15 +384,6 @@ func (c *ipamController) updateMetrics() error {
 		borrowedGauge.WithLabelValues(node).Set(float64(num))
 	}
 	return nil
-}
-
-func containsString(l []string, s string) bool {
-	for _, ss := range l {
-		if ss == s {
-			return true
-		}
-	}
-	return false
 }
 
 func (c *ipamController) cleanup() error {
