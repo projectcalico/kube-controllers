@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/projectcalico/kube-controllers/pkg/config"
@@ -28,7 +27,6 @@ import (
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
-	cnet "github.com/projectcalico/libcalico-go/lib/net"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
@@ -70,23 +68,45 @@ func registerPrometheusMetrics() {
 
 func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs *kubernetes.Clientset) *ipamController {
 	return &ipamController{
-		allBlocks:      make(map[string]model.KVPair),
-		rl:             workqueue.DefaultControllerRateLimiter(),
-		syncChan:       make(chan interface{}, 1),
-		client:         c,
-		clientset:      cs,
-		confirmedLeaks: make(map[string]time.Time),
-		leakCandidates: make(map[string]time.Time),
-		config:         cfg,
+		client:      c,
+		clientset:   cs,
+		config:      cfg,
+		rl:          workqueue.DefaultControllerRateLimiter(),
+		syncChan:    make(chan interface{}, 1),
+		blockUpdate: make(chan model.KVPair),
+
+		allBlocks:          make(map[string]model.KVPair),
+		allocationsByBlock: make(map[string]map[string]*allocation),
+		allocationsByNode:  make(map[string]map[string]*allocation),
+
+		blocksByNode:      make(map[string]int),
+		borrowedIPsByNode: make(map[string]int),
 	}
 
 }
 
-type ipamController struct {
-	sync.Mutex
+type allocation struct {
+	ip     string
+	handle string
+	attrs  map[string]string
+}
 
+func (a *allocation) fields() log.Fields {
+	return log.Fields{
+		"ip":     a.ip,
+		"handle": a.handle,
+	}
+}
+
+func (a *allocation) node() string {
+	if node, ok := a.attrs[ipam.AttributeNode]; ok {
+		return node
+	}
+	return ""
+}
+
+type ipamController struct {
 	rl        workqueue.RateLimiter
-	allBlocks map[string]model.KVPair
 	client    client.Interface
 	clientset *kubernetes.Clientset
 	config    config.NodeControllerConfig
@@ -94,9 +114,19 @@ type ipamController struct {
 	// syncChan triggers processing in response to an update.
 	syncChan chan interface{}
 
-	// WIP: For tracking IP leak status.
-	confirmedLeaks map[string]time.Time
-	leakCandidates map[string]time.Time
+	// For block update / deletion events.
+	blockUpdate chan model.KVPair
+
+	// Raw block storage.
+	allBlocks map[string]model.KVPair
+
+	// Store allocations broken out from the raw blocks by their handle.
+	allocationsByBlock map[string]map[string]*allocation
+	allocationsByNode  map[string]map[string]*allocation
+
+	// Keep track of various counts so that we can report them as metrics.
+	blocksByNode      map[string]int
+	borrowedIPsByNode map[string]int
 }
 
 func (c *ipamController) Start(stop chan struct{}) {
@@ -123,18 +153,12 @@ func (c *ipamController) onUpdate(update bapi.Update) {
 	case bapi.UpdateTypeKVUpdated:
 		switch update.KVPair.Value.(type) {
 		case *model.AllocationBlock:
-			c.Lock()
-			c.allBlocks[update.Key.(model.BlockKey).CIDR.String()] = update.KVPair
-			c.Unlock()
-			kick(c.syncChan)
+			c.blockUpdate <- update.KVPair
 		}
 	case bapi.UpdateTypeKVDeleted:
 		switch update.KVPair.Key.(type) {
 		case model.BlockKey:
-			c.Lock()
-			delete(c.allBlocks, update.Key.(model.BlockKey).CIDR.String())
-			c.Unlock()
-			kick(c.syncChan)
+			c.blockUpdate <- update.KVPair
 		}
 	default:
 		logrus.Errorf("Unhandled update type")
@@ -143,20 +167,8 @@ func (c *ipamController) onUpdate(update bapi.Update) {
 
 func (c *ipamController) OnKubernetesNodeDeleted() {
 	// When a Kubernetes node is deleted, trigger a sync.
+	log.Info("Kubernetes node deletion event")
 	kick(c.syncChan)
-}
-
-// listBlocks returns the full set of IPAM blocks from the controller's cache, as populated by the syncer.
-func (c *ipamController) listBlocks() (map[string]model.KVPair, error) {
-	c.Lock()
-	defer c.Unlock()
-
-	// Make a copy of the blocks map to return.
-	blocks := make(map[string]model.KVPair, len(c.allBlocks))
-	for k, v := range c.allBlocks {
-		blocks[k] = v
-	}
-	return blocks, nil
 }
 
 // acceptScheduleRequests is the main worker routine of the IPAM controller. It monitors
@@ -165,12 +177,28 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 	for {
 		// Wait until something wakes us up, or we are stopped
 		select {
+		case kvp := <-c.blockUpdate:
+			if kvp.Value != nil {
+				// Update block map.
+				c.onBlockUpdated(kvp)
+			} else {
+				// Remove block from storage.
+				c.onBlockDeleted(kvp.Key.(model.BlockKey))
+			}
 		case <-c.syncChan:
-			// This checks for leaks and also updates IPAM data for metrics.
+			// Perform an IPAM sync.
+			log.Info("Received kick over sync channel")
 			err := c.syncDelete()
 			if err != nil {
-				log.WithError(err).Warn("error gathering IPAM data")
+				// We can kick ourselves on error for a retry. We have ratelimiting
+				// built in to the cleanup code.
+				log.WithError(err).Warn("error syncing IPAM data")
+				kick(c.syncChan)
 			}
+
+			// Update prometheus metrics.
+			// TODO: Do we need / want to do this every sync? Can we batch?
+			c.updateMetrics()
 		case <-stopCh:
 			return
 		}
@@ -200,12 +228,7 @@ func (c *ipamController) syncDelete() error {
 // It does not return an error if it is successful, or if there is no action to take.
 func (c *ipamController) syncIPAMCleanup() error {
 	log.Info("Synchronizing IPAM data")
-	data, err := c.gatherIPAMData()
-	if err != nil {
-		return err
-	}
-	// err = c.cleanupNew(data)
-	err = c.cleanup(data)
+	err := c.cleanup()
 	if err != nil {
 		return err
 	}
@@ -213,48 +236,128 @@ func (c *ipamController) syncIPAMCleanup() error {
 	return nil
 }
 
-func (c *ipamController) gatherIPAMData() (map[string][]model.AllocationAttribute, error) {
+func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
+	// Update the raw block store.
+	blockCIDR := kvp.Key.(model.BlockKey).CIDR.String()
+	log.WithField("block", blockCIDR).Info("Received block update")
+	b := kvp.Value.(*model.AllocationBlock)
+	c.allBlocks[blockCIDR] = kvp
+
+	// Include affinity if it exists. We want to track nodes even
+	// if there are no IPs actually assigned to that node.
+	if b.Affinity != nil {
+		n := strings.TrimPrefix(*b.Affinity, "host:")
+		if _, ok := c.allocationsByNode[n]; !ok {
+			c.allocationsByNode[n] = map[string]*allocation{}
+		}
+	}
+
+	// Update allocations contributed from this block.
+	allocatedHandles := map[string]bool{}
+	for ord, idx := range b.Allocations {
+		if idx == nil {
+			// Not allocated.
+			continue
+		}
+		attr := b.Attributes[*idx]
+
+		// If there is no handle, then skip this IP. We need the handle
+		// in order to release the IP below.
+		if attr.AttrPrimary == nil {
+			continue
+		}
+		handle := *attr.AttrPrimary
+		allocatedHandles[handle] = true
+
+		// Check if we already know about this allocation.
+		if _, ok := c.allocationsByBlock[blockCIDR][handle]; ok {
+			// Already known. TODO: Update existing allocation fields.
+			continue
+		}
+
+		// This is a new allocation.
+		alloc := allocation{
+			ip:     ordinalToIP(b, ord).String(),
+			handle: handle,
+			attrs:  attr.AttrSecondary,
+		}
+		if _, ok := c.allocationsByBlock[blockCIDR]; !ok {
+			c.allocationsByBlock[blockCIDR] = map[string]*allocation{}
+		}
+		c.allocationsByBlock[blockCIDR][handle] = &alloc
+
+		// Update the allocations-by-node view.
+		if node := alloc.node(); node != "" {
+			if _, ok := c.allocationsByNode[node]; !ok {
+				c.allocationsByNode[node] = map[string]*allocation{}
+			}
+			c.allocationsByNode[node][handle] = &alloc
+		}
+	}
+
+	// Remove any previously assigned allocations that have since been released.
+	for handle, alloc := range c.allocationsByBlock[blockCIDR] {
+		if _, ok := allocatedHandles[handle]; !ok {
+			// Needs release.
+			delete(c.allocationsByBlock[blockCIDR], handle)
+
+			// Also remove from the node view.
+			if node := alloc.node(); node != "" {
+				delete(c.allocationsByNode[node], handle)
+			}
+		}
+	}
+
+	log.Infof("Updated allocationsByNode: %+v", c.allocationsByNode)
+	log.Infof("Updated allocationsByBlok: %+v", c.allocationsByBlock)
+
+	// Kick the sync channel to trigger a resync.
+	kick(c.syncChan)
+}
+
+func (c *ipamController) onBlockDeleted(key model.BlockKey) {
+	// Update the raw block store.
+	log.WithField("block", key.CIDR.String()).Info("Received block delete")
+	delete(c.allBlocks, key.CIDR.String())
+
+	// Update the node view.
+	allocations := c.allocationsByBlock[key.CIDR.String()]
+	for handle, alloc := range allocations {
+		if node := alloc.node(); node != "" {
+			delete(c.allocationsByNode[node], handle)
+		}
+	}
+
+	// Delete the block.
+	delete(c.allocationsByBlock, key.CIDR.String())
+
+	log.Infof("Updated allocationsByNode after del : %+v", c.allocationsByNode)
+	log.Infof("Updated allocationsByBlok after del : %+v", c.allocationsByBlock)
+
+	// Kick the sync channel to trigger a resync.
+	kick(c.syncChan)
+}
+
+func (c *ipamController) updateMetrics() error {
 	log.Debug("gathering latest IPAM state")
 
-	// Query all IPAM blocks in the cluster, ratelimiting calls.
-	time.Sleep(c.rl.When(RateLimitCalicoList))
-	blocks, err := c.listBlocks()
-	if err != nil {
-		return nil, err
-	}
-	c.rl.Forget(RateLimitCalicoList)
-
 	// Keep track of various counts so that we can report them as metrics.
-	allocationsByNode := map[string]int{}
 	blocksByNode := map[string]int{}
 	borrowedIPsByNode := map[string]int{}
 
-	// Build a list of all the nodes in the cluster based on IPAM allocations across all
-	// blocks, plus affinities. Entries are Calico node names.
-	calicoNodes := map[string][]model.AllocationAttribute{}
-	for _, kvp := range blocks {
+	// Iterate blocks to determine the correct metric values.
+	for _, kvp := range c.allBlocks {
 		b := kvp.Value.(*model.AllocationBlock)
-
-		// Include affinity if it exists. We want to track nodes even
-		// if there are no IPs actually assigned to that node.
 		if b.Affinity != nil {
 			n := strings.TrimPrefix(*b.Affinity, "host:")
-			if _, ok := calicoNodes[n]; !ok {
-				calicoNodes[n] = []model.AllocationAttribute{}
-			}
-
-			// Increment number of blocks on this node.
 			blocksByNode[n]++
 		} else {
 			// Count blocks with no affinity as a pseudo-node.
 			blocksByNode["no_affinity"]++
 		}
 
-		// To reduce log spam.
-		firstSkip := true
-
 		// Go through each IPAM allocation, check its attributes for the node it is assigned to.
-		for ord, idx := range b.Allocations {
+		for _, idx := range b.Allocations {
 			if idx == nil {
 				// Not allocated.
 				continue
@@ -262,49 +365,20 @@ func (c *ipamController) gatherIPAMData() (map[string][]model.AllocationAttribut
 			attr := b.Attributes[*idx]
 
 			// Track nodes based on IP allocations.
-			if val, ok := attr.AttrSecondary[ipam.AttributeNode]; ok {
-				if _, ok := calicoNodes[val]; !ok {
-					calicoNodes[val] = []model.AllocationAttribute{}
-				}
-
+			if node, ok := attr.AttrSecondary[ipam.AttributeNode]; ok {
 				// Update metrics maps with this allocation.
-				allocationsByNode[val]++
-				if b.Affinity == nil || val != strings.TrimPrefix(*b.Affinity, "host:") {
+				if b.Affinity == nil || node != strings.TrimPrefix(*b.Affinity, "host:") {
 					// If the allocations node doesn't match the block's, then this is borrowed.
-					borrowedIPsByNode[val]++
+					borrowedIPsByNode[node]++
 				}
-
-				// Extract the IP and hack it into the attributes - this is a hack
-				// by this controller to track the actual IP respresented.
-				// TODO
-				ip := ordinalToIP(b, ord)
-				attr.AttrSecondary["controller.projectcalico.org/ip"] = ip.String()
-
-				// If there is no handle, then skip this IP. We need the handle
-				// in order to release the IP below.
-				if attr.AttrPrimary == nil {
-					logc := log.WithFields(log.Fields{"ip": ip, "block": b.CIDR.String()})
-					if firstSkip {
-						logc.Warnf("Skipping IP with no handle")
-						firstSkip = false
-					} else {
-						logc.Debugf("Skipping IP with no handle")
-					}
-					continue
-				}
-
-				// Add this allocation to the node, so we can release it later if
-				// we need to.
-				calicoNodes[val] = append(calicoNodes[val], attr)
 			}
 		}
 	}
-	log.Debugf("Calico nodes found in IPAM: %v", calicoNodes)
 
 	// Update prometheus metrics.
 	ipsGauge.Reset()
-	for node, num := range allocationsByNode {
-		ipsGauge.WithLabelValues(node).Set(float64(num))
+	for node, allocations := range c.allocationsByNode {
+		ipsGauge.WithLabelValues(node).Set(float64(len(allocations)))
 	}
 	blocksGauge.Reset()
 	for node, num := range blocksByNode {
@@ -314,182 +388,161 @@ func (c *ipamController) gatherIPAMData() (map[string][]model.AllocationAttribut
 	for node, num := range borrowedIPsByNode {
 		borrowedGauge.WithLabelValues(node).Set(float64(num))
 	}
-	return calicoNodes, nil
-}
-
-type candidate struct {
-	ip     string
-	pod    string
-	ns     string
-	podIP  string
-	handle string
-	node   string
-}
-
-func (c *candidate) fields() log.Fields {
-	return log.Fields{
-		"ip":     c.ip,
-		"podIP":  c.podIP,
-		"pod":    c.pod,
-		"ns":     c.ns,
-		"handle": c.handle,
-		"node":   c.node,
-	}
-
-}
-
-func (c *ipamController) cleanupNew(calicoNodes map[string][]model.AllocationAttribute) error {
-	allHandles := []string{}
-	leakCandidates := map[string]candidate{}
-	for cnode, allocations := range calicoNodes {
-		// Lookup the corresponding Kubernetes node for each Calico node we found in IPAM.
-		// In KDD mode, these are identical. However, in etcd mode its possible that the Calico node has a
-		// different name from the Kubernetes node.
-		knode, err := c.kubernetesNodeForCalico(cnode)
-		if err != nil {
-			// Error checking for matching k8s node. Skip for now.
-			log.WithError(err).Warnf("Failed to lookup corresponding node, skipping %s", cnode)
-			continue
-		}
-
-		logc := log.WithFields(log.Fields{"calicoNode": cnode, "k8sNode": knode})
-
-		// Go through every allocation and build a map of candidate leaked addresses.
-		for _, a := range allocations {
-			ns := a.AttrSecondary[ipam.AttributeNamespace]
-			pod := a.AttrSecondary[ipam.AttributePod]
-			ipip := a.AttrSecondary[ipam.AttributeType] == ipam.AttributeTypeIPIP
-			vxlan := a.AttrSecondary[ipam.AttributeType] == ipam.AttributeTypeVXLAN
-			wg := a.AttrSecondary[ipam.AttributeType] == ipam.AttributeTypeWireguard
-			ip := a.AttrSecondary["controller.projectcalico.org/ip"]
-
-			// Can't release IPs without a handle.
-			// TODO: Release by value?
-			if a.AttrPrimary == nil {
-				logc.WithFields(log.Fields{"pod": pod, "ns": ns}).Warnf("IP has no handle")
-				continue
-			}
-			handle := *a.AttrPrimary
-
-			// We'll use this to clean up later.
-			allHandles = append(allHandles, handle)
-
-			// Skip any allocations which are not either a Kubernetes pod, or a node's
-			// IPIP, VXLAN or Wireguard address. In practice, we don't expect these, but they might exist.
-			// When they do, they will need to be released outside of this controller.
-			if (ns == "" || pod == "") && !ipip && !vxlan && !wg {
-				logc.Info("IP allocation on node is from an unknown source. Will be unable to cleanup block until it is removed.")
-				continue
-			}
-
-			// For now, skip node IPIP / VXLAN / WG addresses. We need to add code to check these.
-			// TODO
-			if ipip || vxlan || wg {
-				continue
-			}
-
-			// If we don't know the node or pod, we can't proceed.
-			if knode == "" || pod == "" {
-				logc.WithFields(log.Fields{"knod": knode, "pod": pod}).Warnf("Missing node/pod info")
-				continue
-			}
-
-			// Check to see if the pod still exists. If it does, then we shouldn't clean up
-			// this node, since it might come back online.
-			var podIP string
-			if c.podExistsOnNode(pod, ns, knode) {
-				logc.WithFields(log.Fields{"pod": pod, "ns": ns}).Debugf("Pod still exists")
-
-				// The pod exists, but does it have the correct IP address?
-				// TODO: Need to figure out how this works with multus IPs.
-				p, err := c.clientset.CoreV1().Pods(ns).Get(context.Background(), pod, metav1.GetOptions{})
-				if err != nil {
-					log.WithError(err).Warn("Failed to query pod, assume it has correct IP")
-					continue
-				}
-
-				if p.Status.PodIP != "" && p.Status.PodIP == ip {
-					logc.WithFields(log.Fields{"pod": pod, "ns": ns}).Debugf("Pod IP is still valid")
-					continue
-				} else if p.Status.PodIP == "" {
-					logc.WithFields(log.Fields{"pod": pod, "ns": ns}).Debugf("Pod IP has not yet been reported")
-					continue
-				}
-
-				podIP = p.Status.PodIP
-				logc.WithFields(log.Fields{"pod": pod, "ns": ns, "podIP": podIP, "ip": ip}).Debugf("Allocated IP no longer in-use by pod")
-			}
-
-			leakCandidates[handle] = candidate{
-				ip:     ip,
-				podIP:  podIP,
-				ns:     ns,
-				pod:    pod,
-				handle: handle,
-				node:   knode,
-			}
-		}
-	}
-
-	// Remove any handles which no longer exist.
-	for h := range c.leakCandidates {
-		if !containsString(allHandles, h) {
-			delete(c.leakCandidates, h)
-			log.WithFields(log.Fields{"handle": h}).Infof("IP address is no longer a leak candidate")
-		}
-	}
-	for h := range c.confirmedLeaks {
-		if !containsString(allHandles, h) {
-			delete(c.confirmedLeaks, h)
-			log.WithFields(log.Fields{"handle": h}).Infof("IP address is no longer a confirmed leak")
-		}
-	}
-
-	// Use the same timestamp so it's easier to tell which IPs were done in which batch.
-	now := time.Now()
-
-	// Go through the candidates and update state.
-	for handle, candy := range leakCandidates {
-		if ts, ok := c.leakCandidates[handle]; ok {
-			// We have already seen this leak candidate.
-			if _, ok := c.confirmedLeaks[handle]; !ok {
-				// Not already a confirmed leak.
-				if time.Since(ts) > 2*time.Minute {
-					// It's time is up - this is a confirmed leak.
-					log.WithFields(candy.fields()).Warnf("IP is a confirmed leak")
-					c.confirmedLeaks[handle] = now
-					delete(c.leakCandidates, handle)
-				}
-			}
-		} else {
-			// Either a known leak or a new candidate.
-			if _, ok := c.confirmedLeaks[handle]; !ok {
-				// New candidate.
-				log.WithFields(candy.fields()).Warnf("IP is a new leak candidate")
-				c.leakCandidates[handle] = now
-			}
-		}
-	}
-
-	log.WithFields(log.Fields{"leakCandidates": len(c.leakCandidates), "confirmedLeaks": len(c.confirmedLeaks)}).Info("Analyzed IP leaks")
-
-	for h := range c.confirmedLeaks {
-		// Release each confirmed leak.
-		// TODO: Release by handle is race-prone!
-		if err := c.client.IPAM().ReleaseByHandle(context.TODO(), h); err != nil {
-			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
-				// If it doesn't exist, we're OK, since we don't want it to!
-				log.WithField("handle", h).Debug("IP was already released")
-				continue
-			}
-			log.WithError(err).WithField("handle", h).Warning("Failed to release IP")
-			continue
-		}
-		// Success.
-		delete(c.confirmedLeaks, h)
-	}
 	return nil
 }
+
+// func (c *ipamController) cleanupNew(calicoNodes map[string][]model.AllocationAttribute) error {
+// 	allHandles := []string{}
+// 	leakCandidates := map[string]candidate{}
+// 	for cnode, allocations := range calicoNodes {
+// 		// Lookup the corresponding Kubernetes node for each Calico node we found in IPAM.
+// 		// In KDD mode, these are identical. However, in etcd mode its possible that the Calico node has a
+// 		// different name from the Kubernetes node.
+// 		knode, err := c.kubernetesNodeForCalico(cnode)
+// 		if err != nil {
+// 			// Error checking for matching k8s node. Skip for now.
+// 			log.WithError(err).Warnf("Failed to lookup corresponding node, skipping %s", cnode)
+// 			continue
+// 		}
+
+// 		logc := log.WithFields(log.Fields{"calicoNode": cnode, "k8sNode": knode})
+
+// 		// Go through every allocation and build a map of candidate leaked addresses.
+// 		for _, a := range allocations {
+// 			ns := a.AttrSecondary[ipam.AttributeNamespace]
+// 			pod := a.AttrSecondary[ipam.AttributePod]
+// 			ipip := a.AttrSecondary[ipam.AttributeType] == ipam.AttributeTypeIPIP
+// 			vxlan := a.AttrSecondary[ipam.AttributeType] == ipam.AttributeTypeVXLAN
+// 			wg := a.AttrSecondary[ipam.AttributeType] == ipam.AttributeTypeWireguard
+// 			ip := a.AttrSecondary["controller.projectcalico.org/ip"]
+
+// 			// Can't release IPs without a handle.
+// 			// TODO: Release by value?
+// 			if a.AttrPrimary == nil {
+// 				logc.WithFields(log.Fields{"pod": pod, "ns": ns}).Warnf("IP has no handle")
+// 				continue
+// 			}
+// 			handle := *a.AttrPrimary
+
+// 			// We'll use this to clean up later.
+// 			allHandles = append(allHandles, handle)
+
+// 			// Skip any allocations which are not either a Kubernetes pod, or a node's
+// 			// IPIP, VXLAN or Wireguard address. In practice, we don't expect these, but they might exist.
+// 			// When they do, they will need to be released outside of this controller.
+// 			if (ns == "" || pod == "") && !ipip && !vxlan && !wg {
+// 				logc.Info("IP allocation on node is from an unknown source. Will be unable to cleanup block until it is removed.")
+// 				continue
+// 			}
+
+// 			// For now, skip node IPIP / VXLAN / WG addresses. We need to add code to check these.
+// 			// TODO
+// 			if ipip || vxlan || wg {
+// 				continue
+// 			}
+
+// 			// If we don't know the node or pod, we can't proceed.
+// 			if knode == "" || pod == "" {
+// 				logc.WithFields(log.Fields{"knod": knode, "pod": pod}).Warnf("Missing node/pod info")
+// 				continue
+// 			}
+
+// 			// Check to see if the pod still exists. If it does, then we shouldn't clean up
+// 			// this node, since it might come back online.
+// 			var podIP string
+// 			if c.podExistsOnNode(pod, ns, knode) {
+// 				logc.WithFields(log.Fields{"pod": pod, "ns": ns}).Debugf("Pod still exists")
+
+// 				// The pod exists, but does it have the correct IP address?
+// 				// TODO: Need to figure out how this works with multus IPs.
+// 				p, err := c.clientset.CoreV1().Pods(ns).Get(context.Background(), pod, metav1.GetOptions{})
+// 				if err != nil {
+// 					log.WithError(err).Warn("Failed to query pod, assume it has correct IP")
+// 					continue
+// 				}
+
+// 				if p.Status.PodIP != "" && p.Status.PodIP == ip {
+// 					logc.WithFields(log.Fields{"pod": pod, "ns": ns}).Debugf("Pod IP is still valid")
+// 					continue
+// 				} else if p.Status.PodIP == "" {
+// 					logc.WithFields(log.Fields{"pod": pod, "ns": ns}).Debugf("Pod IP has not yet been reported")
+// 					continue
+// 				}
+
+// 				podIP = p.Status.PodIP
+// 				logc.WithFields(log.Fields{"pod": pod, "ns": ns, "podIP": podIP, "ip": ip}).Debugf("Allocated IP no longer in-use by pod")
+// 			}
+
+// 			leakCandidates[handle] = candidate{
+// 				ip:     ip,
+// 				podIP:  podIP,
+// 				ns:     ns,
+// 				pod:    pod,
+// 				handle: handle,
+// 				node:   knode,
+// 			}
+// 		}
+// 	}
+
+// 	// Remove any handles which no longer exist.
+// 	for h := range c.leakCandidates {
+// 		if !containsString(allHandles, h) {
+// 			delete(c.leakCandidates, h)
+// 			log.WithFields(log.Fields{"handle": h}).Infof("IP address is no longer a leak candidate")
+// 		}
+// 	}
+// 	for h := range c.confirmedLeaks {
+// 		if !containsString(allHandles, h) {
+// 			delete(c.confirmedLeaks, h)
+// 			log.WithFields(log.Fields{"handle": h}).Infof("IP address is no longer a confirmed leak")
+// 		}
+// 	}
+
+// 	// Use the same timestamp so it's easier to tell which IPs were done in which batch.
+// 	now := time.Now()
+
+// 	// Go through the candidates and update state.
+// 	for handle, candy := range leakCandidates {
+// 		if ts, ok := c.leakCandidates[handle]; ok {
+// 			// We have already seen this leak candidate.
+// 			if _, ok := c.confirmedLeaks[handle]; !ok {
+// 				// Not already a confirmed leak.
+// 				if time.Since(ts) > 2*time.Minute {
+// 					// It's time is up - this is a confirmed leak.
+// 					log.WithFields(candy.fields()).Warnf("IP is a confirmed leak")
+// 					c.confirmedLeaks[handle] = now
+// 					delete(c.leakCandidates, handle)
+// 				}
+// 			}
+// 		} else {
+// 			// Either a known leak or a new candidate.
+// 			if _, ok := c.confirmedLeaks[handle]; !ok {
+// 				// New candidate.
+// 				log.WithFields(candy.fields()).Warnf("IP is a new leak candidate")
+// 				c.leakCandidates[handle] = now
+// 			}
+// 		}
+// 	}
+
+// 	log.WithFields(log.Fields{"leakCandidates": len(c.leakCandidates), "confirmedLeaks": len(c.confirmedLeaks)}).Info("Analyzed IP leaks")
+
+// 	for h := range c.confirmedLeaks {
+// 		// Release each confirmed leak.
+// 		// TODO: Release by handle is race-prone!
+// 		if err := c.client.IPAM().ReleaseByHandle(context.TODO(), h); err != nil {
+// 			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
+// 				// If it doesn't exist, we're OK, since we don't want it to!
+// 				log.WithField("handle", h).Debug("IP was already released")
+// 				continue
+// 			}
+// 			log.WithError(err).WithField("handle", h).Warning("Failed to release IP")
+// 			continue
+// 		}
+// 		// Success.
+// 		delete(c.confirmedLeaks, h)
+// 	}
+// 	return nil
+// }
 
 func containsString(l []string, s string) bool {
 	for _, ss := range l {
@@ -500,21 +553,13 @@ func containsString(l []string, s string) bool {
 	return false
 }
 
-func normaliseIP(addr string) (string, error) {
-	ip, _, err := cnet.ParseCIDROrIP(addr)
-	if err != nil {
-		return "", err
-	}
-	return ip.String(), nil
-}
-
-func (c *ipamController) cleanup(calicoNodes map[string][]model.AllocationAttribute) error {
+func (c *ipamController) cleanup() error {
 	// For storing any errors encountered below.
 	var storedErr error
 
 	// For each node present in IPAM, if it doesn't exist in the Kubernetes API then we
 	// should consider it a candidate for cleanup.
-	for cnode, allocations := range calicoNodes {
+	for cnode, allocations := range c.allocationsByNode {
 		// Lookup the corresponding Kubernetes node for each Calico node we found in IPAM.
 		// In KDD mode, these are identical. However, in etcd mode its possible that the Calico node has a
 		// different name from the Kubernetes node.
@@ -545,11 +590,11 @@ func (c *ipamController) cleanup(calicoNodes map[string][]model.AllocationAttrib
 		// extra sure that the node is gone before we clean it up.
 		canDelete := true
 		for _, a := range allocations {
-			ns := a.AttrSecondary[ipam.AttributeNamespace]
-			pod := a.AttrSecondary[ipam.AttributePod]
-			ipip := a.AttrSecondary[ipam.AttributeType] == ipam.AttributeTypeIPIP
-			vxlan := a.AttrSecondary[ipam.AttributeType] == ipam.AttributeTypeVXLAN
-			wg := a.AttrSecondary[ipam.AttributeType] == ipam.AttributeTypeWireguard
+			ns := a.attrs[ipam.AttributeNamespace]
+			pod := a.attrs[ipam.AttributePod]
+			ipip := a.attrs[ipam.AttributeType] == ipam.AttributeTypeIPIP
+			vxlan := a.attrs[ipam.AttributeType] == ipam.AttributeTypeVXLAN
+			wg := a.attrs[ipam.AttributeType] == ipam.AttributeTypeWireguard
 
 			// Skip any allocations which are not either a Kubernetes pod, or a node's
 			// IPIP, VXLAN or Wireguard address. In practice, we don't expect these, but they might exist.
@@ -594,23 +639,24 @@ func (c *ipamController) cleanup(calicoNodes map[string][]model.AllocationAttrib
 	return nil
 }
 
-func (c *ipamController) cleanupNode(cnode string, allocations []model.AllocationAttribute) error {
+func (c *ipamController) cleanupNode(cnode string, allocations map[string]*allocation) error {
 	// At this point, we've verified that the node isn't in Kubernetes and that all the allocations
 	// are tied to pods which don't exist any more. Clean up any allocations which may still be laying around.
 	logc := log.WithField("calicoNode", cnode)
 	retry := false
 	for _, a := range allocations {
-		if err := c.client.IPAM().ReleaseByHandle(context.TODO(), *a.AttrPrimary); err != nil {
+		logc.Info("Releasing allocation %+v", a)
+		if err := c.client.IPAM().ReleaseByHandle(context.TODO(), a.handle); err != nil {
 			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
 				// If it doesn't exist, we're OK, since we don't want it to!
 				// Try to release any other allocations, but we'll still return an error
 				// to retry the whole thing from the top. On the retry,
 				// we should no longer see any allocations.
-				logc.WithField("handle", *a.AttrPrimary).Debug("IP already released")
+				logc.WithField("handle", a.handle).Debug("IP already released")
 				retry = true
 				continue
 			}
-			logc.WithError(err).WithField("handle", *a.AttrPrimary).Warning("Failed to release IP")
+			logc.WithError(err).WithField("handle", a.handle).Warning("Failed to release IP")
 			retry = true
 			break
 		}
@@ -666,9 +712,6 @@ func (c *ipamController) podExistsOnNode(name, ns, node string) bool {
 // kubernetesNodeForCalico returns the name of the Kubernetes node that corresponds to this Calico node.
 // This function returns an empty string if no action should be taken for this node.
 func (c *ipamController) kubernetesNodeForCalico(cnode string) (string, error) {
-	c.Lock()
-	defer c.Unlock()
-
 	// TODO
 	// for kn, cn := range c.nodemapper {
 	// 	if cn == cnode {
