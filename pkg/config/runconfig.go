@@ -323,7 +323,6 @@ func mergeConfig(envVars map[string]string, envCfg Config, apiCfg v3.KubeControl
 
 		// There is no env var config for this, so always merge from the API config.
 		rCfg.Controllers.Node.LeakGracePeriod = apiCfg.Controllers.Node.LeakGracePeriod
-		log.Infof("RCFG: %+v, APICFG: %+v", rCfg.Controllers.Node, apiCfg.Controllers.Node)
 
 		if envCfg.DatastoreType != "kubernetes" {
 			rc.Node.DeleteNodes = true
