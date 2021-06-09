@@ -113,7 +113,7 @@ func (c *nodeLabelController) OnKubernetesNodeUpdate(obj interface{}) {
 	if n, ok := obj.(*v1.Node); ok {
 		c.syncNodeLabels(n)
 	} else {
-		log.Warn("Received update that is not a v1.Node: %+v", obj)
+		log.Warnf("Received update that is not a v1.Node: %+v", obj)
 	}
 }
 
