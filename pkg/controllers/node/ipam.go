@@ -43,10 +43,6 @@ var (
 	borrowedGauge *prometheus.GaugeVec
 )
 
-// leakGracePeriod is the time the controller will wait before assuming a candidate
-// leaked address is a real leak.
-var leakGracePeriod = 15 * time.Second
-
 func registerPrometheusMetrics() {
 	// Total IP allocations.
 	ipsGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -118,7 +114,7 @@ func (a *allocation) node() string {
 	return ""
 }
 
-func (a *allocation) markLeak() {
+func (a *allocation) markLeak(leakGracePeriod time.Duration) {
 	if a.timestamp == nil {
 		t := time.Now()
 		a.timestamp = &t
@@ -188,6 +184,8 @@ type ipamController struct {
 func (c *ipamController) Start(stop chan struct{}) {
 	go c.acceptScheduleRequests(stop)
 
+	log.Warnf("Running with grace period: %s", c.config.LeakGracePeriod)
+
 	// Trigger a start-of-day sync.
 	kick(c.syncChan)
 }
@@ -231,7 +229,11 @@ func (c *ipamController) OnKubernetesNodeDeleted() {
 // the updates channel and triggers syncs.
 func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 	// Periodic sync ticker.
-	t := time.NewTicker(leakGracePeriod / 2)
+	period := 5 * time.Minute
+	if c.config.LeakGracePeriod != nil {
+		period = c.config.LeakGracePeriod.Duration / 2
+	}
+	t := time.NewTicker(period)
 	for {
 		// Wait until something wakes us up, or we are stopped
 		select {
@@ -392,7 +394,7 @@ func (c *ipamController) onBlockDeleted(key model.BlockKey) {
 	kick(c.syncChan)
 }
 
-func (c *ipamController) updateMetrics() error {
+func (c *ipamController) updateMetrics() {
 	log.Debug("gathering latest IPAM state")
 
 	// Keep track of various counts so that we can report them as metrics.
@@ -444,7 +446,6 @@ func (c *ipamController) updateMetrics() error {
 	for node, num := range borrowedIPsByNode {
 		borrowedGauge.WithLabelValues(node).Set(float64(num))
 	}
-	return nil
 }
 
 // checkDeletedNodes scanes the nodes in Calico IPAM and determines if any should have their
@@ -514,11 +515,11 @@ func (c *ipamController) checkDeletedNodes() ([]string, error) {
 				// - The node the allocation belongs to no longer exists.
 				// - There pod owning this allocation no longer exists.
 				a.markConfirmedLeak()
-			} else {
+			} else if c.config.LeakGracePeriod != nil {
 				// The Kubernetes node still exists, so our confidence is lower.
 				// Mark as a candidate leak. If this state remains, it will switch
 				// to confirmed after the grace period.
-				a.markLeak()
+				a.markLeak(c.config.LeakGracePeriod.Duration)
 			}
 		}
 
@@ -642,7 +643,7 @@ func (c *ipamController) cleanupNode(cnode string, allocations map[string]*alloc
 	logc := log.WithField("calicoNode", cnode)
 	retry := false
 	for _, a := range allocations {
-		logc.Info("Releasing allocation %+v", a)
+		logc.WithFields(a.fields()).Info("Releasing allocation")
 		if err := c.client.IPAM().ReleaseByHandle(context.TODO(), a.handle); err != nil {
 			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
 				// If it doesn't exist, we're OK, since we don't want it to!
@@ -682,26 +683,6 @@ func (c *ipamController) nodeExists(knode string) bool {
 			return false
 		}
 		log.WithError(err).Warn("Failed to query node, assume it exists")
-	}
-	return true
-}
-
-// podExistsOnNode returns whether the given pod exists in the Kubernetes API and is on the provided Kubernetes node.
-// Note that the "node" parameter is the name of the Kubernetes node in the Kubernetes API.
-func (c *ipamController) podExistsOnNode(name, ns, node string) bool {
-	p, err := c.clientset.CoreV1().Pods(ns).Get(context.Background(), name, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return false
-		}
-		log.WithError(err).Warn("Failed to query pod, assume it exists")
-	}
-	if p.Spec.NodeName != node {
-		// If the pod has been rescheduled to a new node, we can treat the old allocation as
-		// gone and clean it up.
-		fields := log.Fields{"old": node, "new": p.Spec.NodeName, "pod": name, "ns": ns}
-		log.WithFields(fields).Info("Pod rescheduled on new node. Will clean up old allocation")
-		return false
 	}
 	return true
 }
