@@ -16,7 +16,6 @@ package node
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -367,13 +366,23 @@ func (c *ipamController) updateMetrics() {
 	}
 }
 
-// checkDeletedNodes scanes the nodes in Calico IPAM and determines if any should have their
-// block affinities released. A node's affinities should be released when:
-// - The node no longer exists in the Kubernetes API.
+// reviewIPAMState scans Calico IPAM and determines if any IPs appear to be leaks, and if any nodes should have their
+// block affinities released.
+//
+// An IP allcation is a candidate for GC when:
+// - The referenced pod does not exist in the k8s API.
+// - The referenced pod exists, but has a mismatched IP.
+//
+// An IP allocation is confirmed for GC when:
+// - It has been a leak candidate for >= the grace period.
+// - It is a leak candidate and it's node has been deleted.
+//
+// A node's affinities should be released when:
+// - The node no longer exists in the Kubernetes API, AND
 // - There are no longer any IP allocations on the node, OR
 // - The remaining IP allocations on the node are all determined to be leaked IP addresses.
 // TODO: We're effectively iterating every allocation in the cluster on every execution. Can we optimize? Or at least rate-limit?
-func (c *ipamController) checkDeletedNodes() ([]string, error) {
+func (c *ipamController) reviewIPAMState() ([]string, error) {
 	// For each node present in IPAM, if it doesn't exist in the Kubernetes API then we
 	// should consider it a candidate for cleanup.
 	nodesToDelete := []string{}
@@ -461,7 +470,6 @@ func (c *ipamController) checkDeletedNodes() ([]string, error) {
 // checkAllocation returns true if the allocation is still in use, and false if the allocation
 // apears to be leaked.
 func (c *ipamController) checkAllocation(a *allocation, knode string) bool {
-	// If we don't have a Kuberetes node name for this allocation
 	ns := a.attrs[ipam.AttributeNamespace]
 	pod := a.attrs[ipam.AttributePod]
 	logc := log.WithFields(a.fields())
@@ -502,7 +510,7 @@ func (c *ipamController) checkAllocation(a *allocation, knode string) bool {
 
 func (c *ipamController) cleanup() error {
 	// Check if any nodes in IPAM need to have affinties released.
-	nodesToDelete, err := c.checkDeletedNodes()
+	nodesToDelete, err := c.reviewIPAMState()
 	if err != nil {
 		return err
 	}
@@ -521,7 +529,7 @@ func (c *ipamController) cleanup() error {
 		// Potentially ratelimit node cleanup.
 		time.Sleep(c.rl.When(RateLimitCalicoDelete))
 		logc.Info("Cleaning up IPAM resources for deleted node")
-		if err := c.cleanupNode(cnode, nil); err != nil {
+		if err := c.cleanupNode(cnode); err != nil {
 			// Store the error, but continue. Storing the error ensures we'll retry.
 			logc.WithError(err).Warnf("Error cleaning up node")
 			storedErr = err
@@ -537,6 +545,8 @@ func (c *ipamController) cleanup() error {
 
 // garbageCollectIPs checks all known allocations and GCs any confirmed leaks.
 func (c *ipamController) garbageCollectIPs() error {
+	// TODO: Do this without iterating every allocation. As we mark them, we can index known leaks
+	// for quicker lookups.
 	for _, allocations := range c.allocationsByNode {
 		for _, a := range allocations {
 			if a.isConfirmedLeak() {
@@ -556,33 +566,10 @@ func (c *ipamController) garbageCollectIPs() error {
 	return nil
 }
 
-func (c *ipamController) cleanupNode(cnode string, allocations map[string]*allocation) error {
+func (c *ipamController) cleanupNode(cnode string) error {
 	// At this point, we've verified that the node isn't in Kubernetes and that all the allocations
 	// are tied to pods which don't exist any more. Clean up any allocations which may still be laying around.
 	logc := log.WithField("calicoNode", cnode)
-	retry := false
-	for _, a := range allocations {
-		logc.WithFields(a.fields()).Info("Releasing allocation")
-		if err := c.client.IPAM().ReleaseByHandle(context.TODO(), a.handle); err != nil {
-			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
-				// If it doesn't exist, we're OK, since we don't want it to!
-				// Try to release any other allocations, but we'll still return an error
-				// to retry the whole thing from the top. On the retry,
-				// we should no longer see any allocations.
-				logc.WithField("handle", a.handle).Debug("IP already released")
-				retry = true
-				continue
-			}
-			logc.WithError(err).WithField("handle", a.handle).Warning("Failed to release IP")
-			retry = true
-			break
-		}
-	}
-
-	if retry {
-		logc.Info("Couldn't release all IPs for stale node, schedule retry")
-		return fmt.Errorf("Couldn't release all IPs")
-	}
 
 	// Release the affinities for this node, requiring that the blocks are empty.
 	if err := c.client.IPAM().ReleaseHostAffinities(context.TODO(), cnode, true); err != nil {
