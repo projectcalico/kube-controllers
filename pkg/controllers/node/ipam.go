@@ -184,8 +184,6 @@ type ipamController struct {
 func (c *ipamController) Start(stop chan struct{}) {
 	go c.acceptScheduleRequests(stop)
 
-	log.Warnf("Running with grace period: %s", c.config.LeakGracePeriod)
-
 	// Trigger a start-of-day sync.
 	kick(c.syncChan)
 }
