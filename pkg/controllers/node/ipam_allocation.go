@@ -28,7 +28,12 @@ type allocation struct {
 	handle string
 	attrs  map[string]string
 
-	timestamp     *time.Time
+	// leakedAt is the time we first identified this allocation
+	// to be a leak candidate.
+	leakedAt *time.Time
+
+	// confirmedLeak is set to true when we are confident this allocation
+	// is a leaked IP.
 	confirmedLeak bool
 }
 
@@ -56,32 +61,32 @@ func (a *allocation) node() string {
 }
 
 func (a *allocation) markLeak(leakGracePeriod time.Duration) {
-	if a.timestamp == nil {
+	if a.leakedAt == nil {
 		t := time.Now()
-		a.timestamp = &t
+		a.leakedAt = &t
 		log.WithFields(a.fields()).Infof("Candidate IP leak")
 	}
 
-	if time.Since(*a.timestamp) > leakGracePeriod && !a.isConfirmedLeak() {
+	if time.Since(*a.leakedAt) > leakGracePeriod && !a.isConfirmedLeak() {
 		a.markConfirmedLeak()
 	}
 }
 
 func (a *allocation) markConfirmedLeak() {
-	if a.timestamp == nil {
+	if a.leakedAt == nil {
 		log.WithFields(a.fields()).Warnf("Confirmed IP leak")
 	} else {
-		log.WithFields(a.fields()).Warnf("Confirmed IP leak after %s", time.Since(*a.timestamp))
+		log.WithFields(a.fields()).Warnf("Confirmed IP leak after %s", time.Since(*a.leakedAt))
 	}
 	a.confirmedLeak = true
 }
 
 func (a *allocation) markValid() {
-	if a.timestamp != nil {
-		log.WithFields(a.fields()).Infof("Confirmed valid IP after %s", time.Since(*a.timestamp))
+	if a.leakedAt != nil {
+		log.WithFields(a.fields()).Infof("Confirmed valid IP after %s", time.Since(*a.leakedAt))
 	}
 	a.confirmedLeak = false
-	a.timestamp = nil
+	a.leakedAt = nil
 }
 
 func (a *allocation) isConfirmedLeak() bool {
@@ -100,4 +105,8 @@ func (a *allocation) isTunnelAddress() bool {
 	vxlan := a.attrs[ipam.AttributeType] == ipam.AttributeTypeVXLAN
 	wg := a.attrs[ipam.AttributeType] == ipam.AttributeTypeWireguard
 	return ipip || vxlan || wg
+}
+
+func (a *allocation) isWindowsReserved() bool {
+	return a.handle == ipam.WindowsReservedHandle
 }

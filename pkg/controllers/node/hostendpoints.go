@@ -62,9 +62,6 @@ func (c *autoHostEndpointController) RegisterWith(f *DataFeed) {
 func (c *autoHostEndpointController) onStatusUpdate(s bapi.SyncStatus) {
 	c.syncStatus = s
 	switch s {
-	case bapi.ResyncInProgress:
-		// Starting the resync so clear our node cache.
-		c.nodeCache = make(map[string]*api.Node)
 	case bapi.InSync:
 		err := c.syncAllAutoHostendpoints(context.Background())
 		if err != nil {
@@ -74,10 +71,10 @@ func (c *autoHostEndpointController) onStatusUpdate(s bapi.SyncStatus) {
 }
 
 func (c *autoHostEndpointController) onUpdate(update bapi.Update) {
-	switch update.UpdateType {
-	case bapi.UpdateTypeKVNew:
-		fallthrough
-	case bapi.UpdateTypeKVUpdated:
+	// Use the presence / absence of the update Value to determine if this is a delete or not.
+	// The value can be nil even if the UpdateType is New or Updated if it is the result of a
+	// failed validation in the syncer, and we want to treat those as deletes.
+	if update.Value != nil {
 		switch update.KVPair.Value.(type) {
 		case *apiv3.Node:
 			n := update.KVPair.Value.(*apiv3.Node)
@@ -93,9 +90,10 @@ func (c *autoHostEndpointController) onUpdate(update bapi.Update) {
 					}
 				}
 			}
+		default:
+			logrus.Warnf("Unexpected kind received over syncer: %s", update.KVPair.Key)
 		}
-
-	case bapi.UpdateTypeKVDeleted:
+	} else {
 		switch update.KVPair.Key.(type) {
 		case model.ResourceKey:
 			switch update.KVPair.Key.(model.ResourceKey).Kind {
@@ -110,13 +108,9 @@ func (c *autoHostEndpointController) onUpdate(update bapi.Update) {
 					}
 				}
 			default:
-				// Shouldn't have any other kinds show up here.
-				logrus.Warnf("Unexpected kind received over syncer: %s", update.KVPair.Key.(model.ResourceKey).Kind)
+				logrus.Warnf("Unexpected kind received over syncer: %s", update.KVPair.Key)
 			}
 		}
-
-	default:
-		logrus.Errorf("Auto HostEndpoint controller received Unhandled update type")
 	}
 }
 

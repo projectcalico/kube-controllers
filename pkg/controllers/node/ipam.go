@@ -87,6 +87,8 @@ type ipamController struct {
 	clientset *kubernetes.Clientset
 	config    config.NodeControllerConfig
 
+	syncStatus bapi.SyncStatus
+
 	// syncChan triggers processing in response to an update.
 	syncChan chan interface{}
 
@@ -114,26 +116,21 @@ func (c *ipamController) RegisterWith(f *DataFeed) {
 }
 
 func (c *ipamController) onStatusUpdate(s bapi.SyncStatus) {
-	// No-op
+	c.syncStatus = s
+	switch s {
+	case bapi.InSync:
+		kick(c.syncChan)
+	}
 }
 
 func (c *ipamController) onUpdate(update bapi.Update) {
-	// TODO: We need to perform a sync on node updates as well.
-	switch update.UpdateType {
-	case bapi.UpdateTypeKVNew:
-		fallthrough
-	case bapi.UpdateTypeKVUpdated:
-		switch update.KVPair.Value.(type) {
-		case *model.AllocationBlock:
-			c.blockUpdate <- update.KVPair
-		}
-	case bapi.UpdateTypeKVDeleted:
-		switch update.KVPair.Key.(type) {
-		case model.BlockKey:
-			c.blockUpdate <- update.KVPair
-		}
+	// TODO: We need to watch nodes and populate a nodemapper
+	switch update.KVPair.Key.(type) {
+	case model.BlockKey:
+		// We send all block updates to the same place no matter the type.
+		c.blockUpdate <- update.KVPair
 	default:
-		logrus.Errorf("Unhandled update type")
+		logrus.Warnf("Unexpected kind received over syncer: %s", update.KVPair.Key)
 	}
 }
 
@@ -164,7 +161,10 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 		case <-t.C:
 			// Periodic IPAM sync.
 			log.Debug("Periodic IPAM sync")
-			_ = c.syncDelete()
+			err := c.syncDelete()
+			if err != nil {
+				log.WithError(err).Warn("Periodic IPAM sync failed")
+			}
 		case <-c.syncChan:
 			// Triggered IPAM sync.
 			log.Debug("Received kick over sync channel")
@@ -186,11 +186,19 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 }
 
 func (c *ipamController) syncDelete() error {
+	// Skip if not InSync yet.
+	if c.syncStatus != bapi.InSync {
+		return nil
+	}
+
 	// First, try doing an IPAM sync. This will check IPAM state and clean up any blocks
 	// which don't belong based on nodes/pods in the k8s API. Don't return the error right away, since
 	// even if this IPAM sync fails we shouldn't block cleaning up the node object. If we do encounter an error,
 	// we'll return it after we're done.
-	err := c.syncIPAMCleanup()
+	err := c.syncIPAM()
+	if err != nil {
+		log.WithError(err).Warn("Error in syncIPAM")
+	}
 	if c.config.DeleteNodes {
 		// If we're running in etcd mode, then we also need to delete the node resource.
 		// We don't need this for KDD mode, since the Calico Node resource is backed
@@ -203,19 +211,6 @@ func (c *ipamController) syncDelete() error {
 	return err
 }
 
-// syncIPAMCleanup cleans up any IPAM resources which should no longer exist based on nodes in the cluster.
-// It returns an error if it is determined that there are resources which should be cleaned up, but is unable to do so.
-// It does not return an error if it is successful, or if there is no action to take.
-func (c *ipamController) syncIPAMCleanup() error {
-	log.Debug("Synchronizing IPAM data")
-	err := c.cleanup()
-	if err != nil {
-		return err
-	}
-	log.Debug("Node and IPAM data is in sync")
-	return nil
-}
-
 func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 	// Update the raw block store.
 	blockCIDR := kvp.Key.(model.BlockKey).CIDR.String()
@@ -226,9 +221,11 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 	// Include affinity if it exists. We want to track nodes even
 	// if there are no IPs actually assigned to that node.
 	if b.Affinity != nil {
-		n := strings.TrimPrefix(*b.Affinity, "host:")
-		if _, ok := c.allocationsByNode[n]; !ok {
-			c.allocationsByNode[n] = map[string]*allocation{}
+		if strings.HasPrefix(*b.Affinity, "host:") {
+			n := strings.TrimPrefix(*b.Affinity, "host:")
+			if _, ok := c.allocationsByNode[n]; !ok {
+				c.allocationsByNode[n] = map[string]*allocation{}
+			}
 		}
 	}
 
@@ -369,7 +366,7 @@ func (c *ipamController) updateMetrics() {
 // reviewIPAMState scans Calico IPAM and determines if any IPs appear to be leaks, and if any nodes should have their
 // block affinities released.
 //
-// An IP allcation is a candidate for GC when:
+// An IP allocation is a candidate for GC when:
 // - The referenced pod does not exist in the k8s API.
 // - The referenced pod exists, but has a mismatched IP.
 //
@@ -385,7 +382,7 @@ func (c *ipamController) updateMetrics() {
 func (c *ipamController) reviewIPAMState() ([]string, error) {
 	// For each node present in IPAM, if it doesn't exist in the Kubernetes API then we
 	// should consider it a candidate for cleanup.
-	nodesToDelete := []string{}
+	nodesToRelease := []string{}
 	for cnode, allocations := range c.allocationsByNode {
 		// Lookup the corresponding Kubernetes node for each Calico node we found in IPAM.
 		// In KDD mode, these are identical. However, in etcd mode its possible that the Calico node has a
@@ -393,8 +390,11 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 		// In KDD mode, if the Node has been deleted from the Kubernetes API, this may be an empty string.
 		knode, err := c.kubernetesNodeForCalico(cnode)
 		if err != nil {
-			// Error checking for matching k8s node. Skip for now.
-			log.WithError(err).Warnf("Failed to lookup corresponding node, skipping %s", cnode)
+			if _, ok := err.(*ErrorNotKubernetes); !ok {
+				log.WithError(err).Info("Skipping non-kubernetes node")
+			} else {
+				log.WithError(err).Warnf("Failed to lookup corresponding node, skipping %s", cnode)
+			}
 			continue
 		}
 		logc := log.WithFields(log.Fields{"calicoNode": cnode, "k8sNode": knode})
@@ -416,23 +416,30 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 		// extra sure that the node is gone before we clean it up.
 		canDelete := true
 		for _, a := range allocations {
-			// Skip any allocations which are not either a Kubernetes pod, or a node's
-			// IPIP, VXLAN or Wireguard address. In practice, we don't expect these, but they might exist.
-			// When they do, they will need to be released outside of this controller in order for
-			// the block to be cleaned up.
+			logc = log.WithFields(a.fields())
+			if a.isWindowsReserved() {
+				// Windows reserved IPs don't need garbage collection. They get released automatically when
+				// the block is released.
+				logc.Debug("Skipping Windows reserved IP address")
+				continue
+			}
+
 			if !a.isPodIP() && !a.isTunnelAddress() {
+				// Skip any allocations which are not either a Kubernetes pod, or a node's
+				// IPIP, VXLAN or Wireguard address. In practice, we don't expect these, but they might exist.
+				// When they do, they will need to be released outside of this controller in order for
+				// the block to be cleaned up.
 				logc.Info("IP allocation on node is from an unknown source. Will be unable to cleanup block until it is removed.")
 				canDelete = false
 				continue
 			}
-
 			if a.isTunnelAddress() && kubernetesNodeExists {
-				// We onlny GC tunnel addresses if the node has been deleted.
+				// We only GC tunnel addresses if the node has been deleted.
 				continue
 			}
 
 			// Check if the allocation is still valid.
-			if knode != "" && c.checkAllocation(a, knode) {
+			if knode != "" && c.allocationIsValid(a, knode) {
 				// Allocation is still valid.
 				canDelete = false
 				a.markValid()
@@ -458,27 +465,35 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 				continue
 			}
 
-			// The node is ready to be removed. It exists in Calico IPAM, but
+			// The node is ready have its IPAM affinities released. It exists in Calico IPAM, but
 			// not in the Kubernetes API. Additionally, we've checked that there are no
 			// outstanding valid allocations on the node.
-			nodesToDelete = append(nodesToDelete, cnode)
+			nodesToRelease = append(nodesToRelease, cnode)
 		}
 	}
-	return nodesToDelete, nil
+	return nodesToRelease, nil
 }
 
-// checkAllocation returns true if the allocation is still in use, and false if the allocation
-// apears to be leaked.
-func (c *ipamController) checkAllocation(a *allocation, knode string) bool {
+// allocationIsValid returns true if the allocation is still in use, and false if the allocation
+// appears to be leaked.
+func (c *ipamController) allocationIsValid(a *allocation, knode string) bool {
 	ns := a.attrs[ipam.AttributeNamespace]
 	pod := a.attrs[ipam.AttributePod]
 	logc := log.WithFields(a.fields())
+
+	if ns == "" || pod == "" {
+		// Allocation is either not a pod address, or it pre-dates the use of these
+		// attributes. Assume it's a valid allocation since we can't perform our
+		// confidence checks below.
+		logc.Info("IP allocation is missing metadata, cannot confirm or deny validity. Assume valid.")
+		return true
+	}
 
 	// Query the pod referenced by this allocation.
 	p, err := c.clientset.CoreV1().Pods(ns).Get(context.Background(), pod, metav1.GetOptions{})
 	if err != nil {
 		if !errors.IsNotFound(err) {
-			log.WithError(err).Warn("Failed to query pod, assume it exists and alloaction is valid")
+			log.WithError(err).Warn("Failed to query pod, assume it exists and allocation is valid")
 			return true
 		}
 		// Pod not found. Assume this is a leak.
@@ -508,9 +523,10 @@ func (c *ipamController) checkAllocation(a *allocation, knode string) bool {
 	return false
 }
 
-func (c *ipamController) cleanup() error {
-	// Check if any nodes in IPAM need to have affinties released.
-	nodesToDelete, err := c.reviewIPAMState()
+func (c *ipamController) syncIPAM() error {
+	// Check if any nodes in IPAM need to have affinities released.
+	log.Debug("Synchronizing IPAM data")
+	nodesToRelease, err := c.reviewIPAMState()
 	if err != nil {
 		return err
 	}
@@ -523,7 +539,7 @@ func (c *ipamController) cleanup() error {
 
 	// Delete any nodes that we determined can be removed above.
 	var storedErr error
-	for _, cnode := range nodesToDelete {
+	for _, cnode := range nodesToRelease {
 		logc := log.WithField("node", cnode)
 
 		// Potentially ratelimit node cleanup.
@@ -540,6 +556,8 @@ func (c *ipamController) cleanup() error {
 	if storedErr != nil {
 		return storedErr
 	}
+
+	log.Debug("IPAM sync completed")
 	return nil
 }
 
@@ -595,6 +613,7 @@ func (c *ipamController) nodeExists(knode string) bool {
 
 // kubernetesNodeForCalico returns the name of the Kubernetes node that corresponds to this Calico node.
 // This function returns an empty string if no action should be taken for this node.
+// Returns ErrorNotKubernetes if the given Calico node is not a Kubernetes node.
 func (c *ipamController) kubernetesNodeForCalico(cnode string) (string, error) {
 	// TODO
 	// for kn, cn := range c.nodemapper {
@@ -617,8 +636,8 @@ func (c *ipamController) kubernetesNodeForCalico(cnode string) (string, error) {
 	}
 
 	// Try to pull the k8s name from the retrieved Calico node object. If there is no match,
-	// this will return an empty string, correctly telling the calling code to ignore this allocation.
-	return getK8sNodeName(*calicoNode), nil
+	// this will return an ErrorNotKubernetes, indicating the node should be ignored.
+	return getK8sNodeName(*calicoNode)
 }
 
 func ordinalToIP(b *model.AllocationBlock, ord int) net.IP {
@@ -648,7 +667,15 @@ func (c *ipamController) syncDeleteEtcd() error {
 	}
 
 	for _, node := range cNodes.Items {
-		k8sNodeName := getK8sNodeName(node)
+		k8sNodeName, err := getK8sNodeName(node)
+		if err != nil {
+			if _, ok := err.(*ErrorNotKubernetes); ok {
+				log.WithError(err).Info("Skipping non-kubernetes node")
+				continue
+			}
+			log.WithError(err).Error("Error getting k8s node name")
+			continue
+		}
 		if k8sNodeName != "" && !kNodeIdx[k8sNodeName] {
 			// No matching Kubernetes node with that name
 			time.Sleep(c.rl.When(RateLimitCalicoDelete))
