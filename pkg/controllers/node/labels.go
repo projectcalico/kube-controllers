@@ -62,24 +62,28 @@ func (c *nodeLabelController) onStatusUpdate(s bapi.SyncStatus) {
 
 // onUpdate receives node objects and maintains the mapping of Kubernetes nodes to Calico nodes.
 func (c *nodeLabelController) onUpdate(update bapi.Update) {
-	switch update.UpdateType {
-	case bapi.UpdateTypeKVNew:
-		fallthrough
-	case bapi.UpdateTypeKVUpdated:
+	// Use the presence / absence of the update Value to determine if this is a delete or not.
+	// The value can be nil even if the UpdateType is New or Updated if it is the result of a
+	// failed validation in the syncer, and we want to treat those as deletes.
+	if update.Value != nil {
 		switch update.KVPair.Value.(type) {
 		case *apiv3.Node:
 			n := update.KVPair.Value.(*apiv3.Node)
-
-			if kn := getK8sNodeName(*n); kn != "" {
+			kn, err := getK8sNodeName(*n)
+			if err != nil {
+				log.WithError(err).Info("Unable to get corresponding k8s node name, skipping")
+			} else if kn != "" {
 				// Create a mapping from Kubernetes node -> Calico node.
 				logrus.Debugf("Mapping k8s node -> calico node. %s -> %s", kn, n.Name)
 				c.Lock()
 				c.nodemapper[kn] = n.Name
 				c.Unlock()
 			}
+		default:
+			// Shouldn't have any other kinds show up here.
+			logrus.Warnf("Unexpected kind received over syncer: %s", update.KVPair.Key)
 		}
-
-	case bapi.UpdateTypeKVDeleted:
+	} else {
 		switch update.KVPair.Key.(type) {
 		case model.ResourceKey:
 			switch update.KVPair.Key.(model.ResourceKey).Kind {
@@ -98,12 +102,10 @@ func (c *nodeLabelController) onUpdate(update bapi.Update) {
 				}
 			default:
 				// Shouldn't have any other kinds show up here.
-				logrus.Warnf("Unexpected kind received over syncer: %s", update.KVPair.Key.(model.ResourceKey).Kind)
+				logrus.Warnf("Unexpected kind received over syncer: %s", update.KVPair.Key)
 			}
 		}
 
-	default:
-		logrus.Errorf("Unhandled update type")
 	}
 }
 
