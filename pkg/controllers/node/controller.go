@@ -89,7 +89,7 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	// Create the Auto HostEndpoint sub-controller and register it to receive data.
 	// We always launch this controller, even if auto-HEPs are disabled, since the controller
 	// is responsible for cleaning up after itself in case it was previously enabled.
-	autoHEPController := NewAuthoHEPController(cfg, calicoClient)
+	autoHEPController := NewAutoHEPController(cfg, calicoClient)
 	autoHEPController.RegisterWith(nc.dataFeed)
 
 	if cfg.SyncLabels {

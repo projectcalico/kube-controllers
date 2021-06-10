@@ -73,6 +73,10 @@ func (a *allocation) markLeak(leakGracePeriod time.Duration) {
 }
 
 func (a *allocation) markConfirmedLeak() {
+	if a.confirmedLeak {
+		// Already confirmed - nothing to do.
+		return
+	}
 	if a.leakedAt == nil {
 		log.WithFields(a.fields()).Warnf("Confirmed IP leak")
 	} else {

@@ -36,11 +36,12 @@ import (
 	"k8s.io/client-go/util/workqueue"
 )
 
-func NewAuthoHEPController(c config.NodeControllerConfig, client client.Interface) *autoHostEndpointController {
+func NewAutoHEPController(c config.NodeControllerConfig, client client.Interface) *autoHostEndpointController {
 	ctrl := &autoHostEndpointController{
-		rl:     workqueue.DefaultControllerRateLimiter(),
-		config: c,
-		client: client,
+		rl:        workqueue.DefaultControllerRateLimiter(),
+		config:    c,
+		client:    client,
+		nodeCache: make(map[string]*api.Node),
 	}
 	return ctrl
 }
