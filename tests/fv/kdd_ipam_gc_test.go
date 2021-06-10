@@ -343,8 +343,5 @@ var _ = Describe("IPAM garbage collection FV tests with short leak grace period"
 		// Expect the tunnel IP to be present as well.
 		err = assertIPsWithHandle(calicoClient.IPAM(), handleAIPIP, 1)
 		Expect(err).NotTo(HaveOccurred())
-
-		// HACK: Fail the test so we can look at logs.
-		Expect(false).To(BeTrue())
 	})
 })

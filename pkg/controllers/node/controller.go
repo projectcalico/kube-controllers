@@ -117,13 +117,13 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 }
 
 // getK8sNodeName is a helper method that searches a calicoNode for its kubernetes nodeRef.
-func getK8sNodeName(calicoNode api.Node) string {
+func getK8sNodeName(calicoNode api.Node) (string, error) {
 	for _, orchRef := range calicoNode.Spec.OrchRefs {
 		if orchRef.Orchestrator == "k8s" {
-			return orchRef.NodeName
+			return orchRef.NodeName, nil
 		}
 	}
-	return ""
+	return "", &ErrorNotKubernetes{calicoNode.Name}
 }
 
 // Run starts the node controller. It does start-of-day preparation
