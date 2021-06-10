@@ -322,7 +322,10 @@ func mergeConfig(envVars map[string]string, envCfg Config, apiCfg v3.KubeControl
 		mergeAutoHostEndpoints(envVars, &status, &rCfg, apiCfg)
 
 		// There is no env var config for this, so always merge from the API config.
-		rCfg.Controllers.Node.LeakGracePeriod = apiCfg.Controllers.Node.LeakGracePeriod
+		if apiCfg.Controllers.Node != nil {
+			rc.Node.LeakGracePeriod = apiCfg.Controllers.Node.LeakGracePeriod
+			status.RunningConfig.Controllers.Node.LeakGracePeriod = apiCfg.Controllers.Node.LeakGracePeriod
+		}
 
 		if envCfg.DatastoreType != "kubernetes" {
 			rc.Node.DeleteNodes = true
