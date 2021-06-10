@@ -21,7 +21,9 @@ import (
 	"time"
 
 	"github.com/projectcalico/kube-controllers/pkg/config"
+	v3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/libcalico-go/lib/backend/k8s/conversion"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
@@ -270,6 +272,7 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 			}
 			c.allocationsByNode[node][handle] = &alloc
 		}
+		log.WithFields(alloc.fields()).Debug("New IP allocation")
 	}
 
 	// Remove any previously assigned allocations that have since been released.
@@ -510,16 +513,46 @@ func (c *ipamController) allocationIsValid(a *allocation, knode string) bool {
 		return false
 	}
 
-	// The pod exists, but does it have the correct IP address?
-	// TODO: Need to figure out how this works with multus IPs.
-	if p.Status.PodIP != "" && p.Status.PodIP == a.ip {
-		logc.Debugf("Pod IP matches, allocation is valid")
-		return true
-	} else if p.Status.PodIP == "" {
-		logc.Debugf("Pod IP has not yet been reported, consider allocation valid")
+	// Check to see if the pod actually has the IP in question. Gate based on the presence of the
+	// status field, which is populated by kubelet.
+	if p.Status.PodIP == "" || len(p.Status.PodIPs) == 0 {
+		// The pod hasn't received an IP yet.
+		log.Debugf("Pod IP has not yet been reported, consider allocation valid")
 		return true
 	}
-	logc.Debugf("Allocated IP no longer in-use by pod")
+
+	// Convert the pod to a workload endpoint. This takes advantage of the IP
+	// gathering logic already implemented in the converter, and handles exceptional cases like
+	// additional WEPs attached to Multus networks.
+	conv := conversion.NewConverter()
+	kvps, err := conv.PodToWorkloadEndpoints(p)
+	if err != nil {
+		log.WithError(err).Warn("Failed to parse pod into WEP, consider allocation valid.")
+		return true
+	}
+
+	for _, kvp := range kvps {
+		if kvp == nil || kvp.Value == nil {
+			// Shouldn't hit this branch, but better safe than sorry.
+			logc.Warn("Pod converted to nil WorkloadEndpoint")
+			continue
+		}
+		wep := kvp.Value.(*v3.WorkloadEndpoint)
+		for _, nw := range wep.Spec.IPNetworks {
+			ip, _, err := net.ParseCIDR(nw)
+			if err != nil {
+				log.WithError(err).Error("Failed to parse IP, assume allocation is valid")
+				return true
+			}
+			if ip.String() == a.ip {
+				// Found a match.
+				log.Debugf("Pod has matching IP, allocation is valid")
+				return true
+			}
+		}
+	}
+
+	log.Debugf("Allocated IP no longer in-use by pod")
 	return false
 }
 
@@ -565,8 +598,8 @@ func (c *ipamController) syncIPAM() error {
 func (c *ipamController) garbageCollectIPs() error {
 	// TODO: Do this without iterating every allocation. As we mark them, we can index known leaks
 	// for quicker lookups.
-	for _, allocations := range c.allocationsByNode {
-		for _, a := range allocations {
+	for node, allocations := range c.allocationsByNode {
+		for handle, a := range allocations {
 			if a.isConfirmedLeak() {
 				logc := log.WithFields(a.fields())
 				logc.Info("Garbage collecting leaked IP address")
@@ -578,6 +611,10 @@ func (c *ipamController) garbageCollectIPs() error {
 					logc.WithError(err).WithField("handle", a.handle).Warning("Failed to release leaked IP")
 					return err
 				}
+
+				// No longer a leak. Remove it from the map here so we're not dependent on receiving
+				// the update from the syncer (which we will do eventually, this is just cleaner).
+				delete(c.allocationsByNode[node], handle)
 			}
 		}
 	}
