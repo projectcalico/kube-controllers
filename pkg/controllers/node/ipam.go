@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/projectcalico/kube-controllers/pkg/config"
+	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	v3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/k8s/conversion"
@@ -69,16 +70,19 @@ func registerPrometheusMetrics() {
 
 func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs *kubernetes.Clientset) *ipamController {
 	return &ipamController{
-		client:      c,
-		clientset:   cs,
-		config:      cfg,
-		rl:          workqueue.DefaultControllerRateLimiter(),
+		client:    c,
+		clientset: cs,
+		config:    cfg,
+		rl:        workqueue.DefaultControllerRateLimiter(),
+
 		syncChan:    make(chan interface{}, 1),
 		blockUpdate: make(chan model.KVPair),
+		nodeUpdate:  make(chan model.KVPair),
 
-		allBlocks:          make(map[string]model.KVPair),
-		allocationsByBlock: make(map[string]map[string]*allocation),
-		allocationsByNode:  make(map[string]map[string]*allocation),
+		allBlocks:                   make(map[string]model.KVPair),
+		allocationsByBlock:          make(map[string]map[string]*allocation),
+		allocationsByNode:           make(map[string]map[string]*allocation),
+		kubernetesNodesByCalicoName: make(map[string]string),
 	}
 
 }
@@ -91,11 +95,15 @@ type ipamController struct {
 
 	syncStatus bapi.SyncStatus
 
+	// kubernetesNodesByCalicoName is a local cache that maps Calico nodes to their Kubernetes node name.
+	kubernetesNodesByCalicoName map[string]string
+
 	// syncChan triggers processing in response to an update.
 	syncChan chan interface{}
 
 	// For block update / deletion events.
 	blockUpdate chan model.KVPair
+	nodeUpdate  chan model.KVPair
 
 	// Raw block storage.
 	allBlocks map[string]model.KVPair
@@ -114,6 +122,7 @@ func (c *ipamController) Start(stop chan struct{}) {
 
 func (c *ipamController) RegisterWith(f *DataFeed) {
 	f.RegisterForNotification(model.BlockKey{}, c.onUpdate)
+	f.RegisterForNotification(model.ResourceKey{}, c.onUpdate)
 	f.RegisterForSyncStatus(c.onStatusUpdate)
 }
 
@@ -126,8 +135,13 @@ func (c *ipamController) onStatusUpdate(s bapi.SyncStatus) {
 }
 
 func (c *ipamController) onUpdate(update bapi.Update) {
-	// TODO: We need to watch nodes and populate a nodemapper
 	switch update.KVPair.Key.(type) {
+	case model.ResourceKey:
+		switch update.KVPair.Key.(model.ResourceKey).Kind {
+		case apiv3.KindNode:
+			c.nodeUpdate <- update.KVPair
+		}
+
 	case model.BlockKey:
 		// We send all block updates to the same place no matter the type.
 		c.blockUpdate <- update.KVPair
@@ -154,6 +168,22 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 	for {
 		// Wait until something wakes us up, or we are stopped
 		select {
+		case kvp := <-c.nodeUpdate:
+			if kvp.Value != nil {
+				n := kvp.Value.(*apiv3.Node)
+				kn, err := getK8sNodeName(*n)
+				if err != nil {
+					log.WithError(err).Info("Unable to get corresponding k8s node name, skipping")
+				} else if kn != "" {
+					// Create a mapping from Kubernetes node -> Calico node.
+					logrus.Debugf("Add mapping calico node -> k8s node. %s -> %s", n.Name, kn)
+					c.kubernetesNodesByCalicoName[n.Name] = kn
+				}
+			} else {
+				cnode := kvp.Key.(model.ResourceKey).Name
+				logrus.Debugf("Remove mapping for calico node %s", cnode)
+				delete(c.kubernetesNodesByCalicoName, cnode)
+			}
 		case kvp := <-c.blockUpdate:
 			if kvp.Value != nil {
 				c.onBlockUpdated(kvp)
@@ -652,15 +682,14 @@ func (c *ipamController) nodeExists(knode string) bool {
 // This function returns an empty string if no corresponding node coule be found.
 // Returns ErrorNotKubernetes if the given Calico node is not a Kubernetes node.
 func (c *ipamController) kubernetesNodeForCalico(cnode string) (string, error) {
-	// TODO
-	// for kn, cn := range c.nodemapper {
-	// 	if cn == cnode {
-	// 		return kn, nil
-	// 	}
-	// }
+	// Check if we have the node name cached.
+	if kn, ok := c.kubernetesNodesByCalicoName[cnode]; ok {
+		return kn, nil
+	}
+	log.WithField("cnode", cnode).Debug("Node not in cache, look it up in the API")
 
 	// If we can't find a matching Kubernetes node, try looking up the Calico node explicitly,
-	// since it's theoretically possible the nodemapper is just running behind the actual state of the
+	// since it's theoretically possible the kubernetesNodesByCalicoName is just running behind the actual state of the
 	// data store.
 	calicoNode, err := c.client.Nodes().Get(context.TODO(), cnode, options.GetOptions{})
 	if err != nil {
