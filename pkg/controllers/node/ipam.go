@@ -152,7 +152,7 @@ func (c *ipamController) onUpdate(update bapi.Update) {
 
 func (c *ipamController) OnKubernetesNodeDeleted() {
 	// When a Kubernetes node is deleted, trigger a sync.
-	log.Info("Kubernetes node deletion event")
+	log.Debug("Kubernetes node deletion event")
 	kick(c.syncChan)
 }
 
@@ -193,14 +193,14 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 		case <-t.C:
 			// Periodic IPAM sync.
 			log.Debug("Periodic IPAM sync")
-			err := c.syncDelete()
+			err := c.maybePerformSync()
 			if err != nil {
 				log.WithError(err).Warn("Periodic IPAM sync failed")
 			}
 		case <-c.syncChan:
 			// Triggered IPAM sync.
 			log.Debug("Received kick over sync channel")
-			err := c.syncDelete()
+			err := c.maybePerformSync()
 			if err != nil {
 				// We can kick ourselves on error for a retry. We have ratelimiting
 				// built in to the cleanup code.
@@ -217,29 +217,23 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 	}
 }
 
-func (c *ipamController) syncDelete() error {
+func (c *ipamController) maybePerformSync() error {
 	// Skip if not InSync yet.
 	if c.syncStatus != bapi.InSync {
+		log.Debug("Have not yet received InSync notification, skipping IPAM sync.")
 		return nil
 	}
 
-	// First, try doing an IPAM sync. This will check IPAM state and clean up any blocks
-	// which don't belong based on nodes/pods in the k8s API. Don't return the error right away, since
-	// even if this IPAM sync fails we shouldn't block cleaning up the node object. If we do encounter an error,
+	// First, try doing an IPAM sync. This will check IPAM state for potential IP leaks, as well as
+	// look for nodes which have been deleted and should have their affinities released.
+	// Don't return the error right away, since even if this IPAM sync fails we shouldn't
+	// block cleaning up the node object. If we do encounter an error,
 	// we'll return it after we're done.
 	err := c.syncIPAM()
 	if err != nil {
 		log.WithError(err).Warn("Error in syncIPAM")
 	}
-	if c.config.DeleteNodes {
-		// If we're running in etcd mode, then we also need to delete the node resource.
-		// We don't need this for KDD mode, since the Calico Node resource is backed
-		// directly by the Kubernetes Node resource, so their lifecycle is identical.
-		errEtcd := c.syncDeleteEtcd()
-		if errEtcd != nil {
-			return errEtcd
-		}
-	}
+
 	return err
 }
 
@@ -708,51 +702,4 @@ func (c *ipamController) kubernetesNodeForCalico(cnode string) (string, error) {
 
 func ordinalToIP(b *model.AllocationBlock, ord int) net.IP {
 	return b.OrdinalToIP(ord).IP
-}
-
-func (c *ipamController) syncDeleteEtcd() error {
-	// Possibly rate limit calls to Calico
-	time.Sleep(c.rl.When(RateLimitCalicoList))
-	cNodes, err := c.client.Nodes().List(context.TODO(), options.ListOptions{})
-	if err != nil {
-		log.WithError(err).Error("Error listing Calico nodes")
-		return err
-	}
-	c.rl.Forget(RateLimitCalicoList)
-
-	time.Sleep(c.rl.When(RateLimitK8s))
-	kNodes, err := c.clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		log.WithError(err).Error("Error listing K8s nodes")
-		return err
-	}
-	c.rl.Forget(RateLimitK8s)
-	kNodeIdx := make(map[string]bool)
-	for _, node := range kNodes.Items {
-		kNodeIdx[node.Name] = true
-	}
-
-	for _, node := range cNodes.Items {
-		k8sNodeName, err := getK8sNodeName(node)
-		if err != nil {
-			if _, ok := err.(*ErrorNotKubernetes); ok {
-				log.WithError(err).Info("Skipping non-kubernetes node")
-				continue
-			}
-			log.WithError(err).Error("Error getting k8s node name")
-			continue
-		}
-		if k8sNodeName != "" && !kNodeIdx[k8sNodeName] {
-			// No matching Kubernetes node with that name
-			time.Sleep(c.rl.When(RateLimitCalicoDelete))
-			_, err := c.client.Nodes().Delete(context.TODO(), node.Name, options.DeleteOptions{})
-			if _, doesNotExist := err.(cerrors.ErrorResourceDoesNotExist); err != nil && !doesNotExist {
-				// We hit an error other than "does not exist".
-				log.WithError(err).Errorf("Error deleting Calico node: %v", node.Name)
-				return err
-			}
-			c.rl.Forget(RateLimitCalicoDelete)
-		}
-	}
-	return nil
 }
