@@ -224,17 +224,14 @@ func (c *ipamController) maybePerformSync() error {
 		return nil
 	}
 
-	// First, try doing an IPAM sync. This will check IPAM state for potential IP leaks, as well as
+	// This will check IPAM state for potential IP leaks, as well as
 	// look for nodes which have been deleted and should have their affinities released.
-	// Don't return the error right away, since even if this IPAM sync fails we shouldn't
-	// block cleaning up the node object. If we do encounter an error,
-	// we'll return it after we're done.
 	err := c.syncIPAM()
 	if err != nil {
 		log.WithError(err).Warn("Error in syncIPAM")
+		return err
 	}
-
-	return err
+	return nil
 }
 
 func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
