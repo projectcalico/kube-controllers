@@ -83,6 +83,7 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs *
 		allocationsByBlock:          make(map[string]map[string]*allocation),
 		allocationsByNode:           make(map[string]map[string]*allocation),
 		kubernetesNodesByCalicoName: make(map[string]string),
+		confirmedLeaks:              make(map[string]*allocation),
 	}
 
 }
@@ -111,6 +112,7 @@ type ipamController struct {
 	// Store allocations broken out from the raw blocks by their handle.
 	allocationsByBlock map[string]map[string]*allocation
 	allocationsByNode  map[string]map[string]*allocation
+	confirmedLeaks     map[string]*allocation
 }
 
 func (c *ipamController) Start(stop chan struct{}) {
@@ -507,6 +509,9 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 				// to confirmed after the grace period.
 				a.markLeak(c.config.LeakGracePeriod.Duration)
 			}
+
+			// If the address is determined to be a confirmed leak, add it to the index.
+			c.confirmedLeaks[a.handle] = a
 		}
 
 		if !kubernetesNodeExists {
@@ -644,26 +649,23 @@ func (c *ipamController) syncIPAM() error {
 
 // garbageCollectIPs checks all known allocations and GCs any confirmed leaks.
 func (c *ipamController) garbageCollectIPs() error {
-	// TODO: Do this without iterating every allocation. As we mark them, we can index known leaks
-	// for quicker lookups.
-	for node, allocations := range c.allocationsByNode {
-		for handle, a := range allocations {
-			if a.isConfirmedLeak() {
-				logc := log.WithFields(a.fields())
-				logc.Info("Garbage collecting leaked IP address")
-				if err := c.client.IPAM().ReleaseByHandle(context.TODO(), a.handle); err != nil {
-					if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
-						logc.WithField("handle", a.handle).Debug("IP already released")
-						continue
-					}
-					logc.WithError(err).WithField("handle", a.handle).Warning("Failed to release leaked IP")
-					return err
+	for handle, a := range c.confirmedLeaks {
+		if a.isConfirmedLeak() {
+			logc := log.WithFields(a.fields())
+			logc.Info("Garbage collecting leaked IP address")
+			if err := c.client.IPAM().ReleaseByHandle(context.TODO(), a.handle); err != nil {
+				if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
+					logc.WithField("handle", a.handle).Debug("IP already released")
+					continue
 				}
-
-				// No longer a leak. Remove it from the map here so we're not dependent on receiving
-				// the update from the syncer (which we will do eventually, this is just cleaner).
-				delete(c.allocationsByNode[node], handle)
+				logc.WithError(err).WithField("handle", a.handle).Warning("Failed to release leaked IP")
+				return err
 			}
+
+			// No longer a leak. Remove it from the map here so we're not dependent on receiving
+			// the update from the syncer (which we will do eventually, this is just cleaner).
+			delete(c.allocationsByNode[a.node()], handle)
+			delete(c.confirmedLeaks, handle)
 		}
 	}
 	return nil
