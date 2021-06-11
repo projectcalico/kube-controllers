@@ -76,14 +76,30 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 	// Create a Node watcher.
 	listWatcher := cache.NewListWatchFromClient(k8sClientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())
 
+	// Store functions to call on node deletion.
+	nodeDeletionFuncs := []func(){}
+
 	// Create the IPAM controller.
 	nc.ipamCtrl = NewIPAMController(cfg, calicoClient, k8sClientset)
 	nc.ipamCtrl.RegisterWith(nc.dataFeed)
+	nodeDeletionFuncs = append(nodeDeletionFuncs, nc.ipamCtrl.OnKubernetesNodeDeleted)
+
+	if cfg.DeleteNodes {
+		// If we're running in etcd mode, then we also need to delete the node resource.
+		// We don't need this for KDD mode, since the Calico Node resource is backed
+		// directly by the Kubernetes Node resource, so their lifecycle is identical.
+		nodeDeletionController := NewNodeDeletionController(calicoClient, k8sClientset)
+		nodeDeletionController.RegisterWith(nc.dataFeed)
+		nodeDeletionFuncs = append(nodeDeletionFuncs, nodeDeletionController.OnKubernetesNodeDeleted)
+	}
 
 	// Setup event handlers
 	handlers := cache.ResourceEventHandlerFuncs{
 		DeleteFunc: func(obj interface{}) {
-			nc.ipamCtrl.OnKubernetesNodeDeleted()
+			// Call all of the registered node deletion funcs.
+			for _, f := range nodeDeletionFuncs {
+				f()
+			}
 		}}
 
 	// Create the Auto HostEndpoint sub-controller and register it to receive data.
