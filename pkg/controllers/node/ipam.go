@@ -649,7 +649,7 @@ func (c *ipamController) nodeExists(knode string) bool {
 }
 
 // kubernetesNodeForCalico returns the name of the Kubernetes node that corresponds to this Calico node.
-// This function returns an empty string if no action should be taken for this node.
+// This function returns an empty string if no corresponding node coule be found.
 // Returns ErrorNotKubernetes if the given Calico node is not a Kubernetes node.
 func (c *ipamController) kubernetesNodeForCalico(cnode string) (string, error) {
 	// TODO
