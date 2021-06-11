@@ -115,9 +115,6 @@ type ipamController struct {
 
 func (c *ipamController) Start(stop chan struct{}) {
 	go c.acceptScheduleRequests(stop)
-
-	// Trigger a start-of-day sync.
-	kick(c.syncChan)
 }
 
 func (c *ipamController) RegisterWith(f *DataFeed) {
@@ -165,31 +162,53 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 		period = c.config.LeakGracePeriod.Duration / 2
 	}
 	t := time.NewTicker(period)
+	log.Info("Will run periodic IPAM sync every %s", period)
 	for {
 		// Wait until something wakes us up, or we are stopped
 		select {
 		case kvp := <-c.nodeUpdate:
+			log.Debug("Node update received")
 			if kvp.Value != nil {
 				n := kvp.Value.(*apiv3.Node)
 				kn, err := getK8sNodeName(*n)
 				if err != nil {
 					log.WithError(err).Info("Unable to get corresponding k8s node name, skipping")
 				} else if kn != "" {
-					// Create a mapping from Kubernetes node -> Calico node.
-					logrus.Debugf("Add mapping calico node -> k8s node. %s -> %s", n.Name, kn)
-					c.kubernetesNodesByCalicoName[n.Name] = kn
+					if current, ok := c.kubernetesNodesByCalicoName[n.Name]; !ok {
+						logrus.Debugf("Add mapping calico node -> k8s node. %s -> %s", n.Name, kn)
+						c.kubernetesNodesByCalicoName[n.Name] = kn
+					} else if current != kn {
+						logrus.Warnf("Update mapping calico node -> k8s node. %s -> %s (previously %s)", n.Name, kn, current)
+						c.kubernetesNodesByCalicoName[n.Name] = kn
+					}
+					// No change.
 				}
 			} else {
 				cnode := kvp.Key.(model.ResourceKey).Name
-				logrus.Debugf("Remove mapping for calico node %s", cnode)
-				delete(c.kubernetesNodesByCalicoName, cnode)
+				if _, ok := c.kubernetesNodesByCalicoName[cnode]; ok {
+					logrus.Debugf("Remove mapping for calico node %s", cnode)
+					delete(c.kubernetesNodesByCalicoName, cnode)
+				}
 			}
+			log.Debug("Node update complete")
 		case kvp := <-c.blockUpdate:
-			if kvp.Value != nil {
-				c.onBlockUpdated(kvp)
-			} else {
-				c.onBlockDeleted(kvp.Key.(model.BlockKey))
+			c.handleBlockUpdate(kvp)
+
+			// It's possible we get a rapid series of block updates in a row. Use
+			// a consolidation loop to handle "batches" of block updates before triggering a sync.
+			var i int
+			for i = 1; i < 1000; i++ {
+				select {
+				case kvp = <-c.blockUpdate:
+					c.handleBlockUpdate(kvp)
+				default:
+					break
+				}
 			}
+
+			// Kick the sync channel to trigger a resync after handling a batch.
+			log.WithField("batchSize", i).Debug("Triggering sync after batch of block updates")
+			kick(c.syncChan)
 		case <-t.C:
 			// Periodic IPAM sync.
 			log.Debug("Periodic IPAM sync")
@@ -197,9 +216,10 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 			if err != nil {
 				log.WithError(err).Warn("Periodic IPAM sync failed")
 			}
+			log.Debug("Periodic IPAM sync complete")
 		case <-c.syncChan:
 			// Triggered IPAM sync.
-			log.Debug("Received kick over sync channel")
+			log.Debug("Triggered IPAM sync")
 			err := c.maybePerformSync()
 			if err != nil {
 				// We can kick ourselves on error for a retry. We have ratelimiting
@@ -211,10 +231,22 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 			// Update prometheus metrics.
 			// TODO: Do we need / want to do this every sync? Can we batch?
 			c.updateMetrics()
+			log.Debug("Triggered IPAM sync complete")
 		case <-stopCh:
 			return
 		}
 	}
+}
+
+// handleBlockUpdate wraps up the logic to execute when receiving a block update.
+func (c *ipamController) handleBlockUpdate(kvp model.KVPair) {
+	log.Debug("Handling blockUpdate")
+	if kvp.Value != nil {
+		c.onBlockUpdated(kvp)
+	} else {
+		c.onBlockDeleted(kvp.Key.(model.BlockKey))
+	}
+	log.Debug("Handled blockUpdate")
 }
 
 func (c *ipamController) maybePerformSync() error {
@@ -237,7 +269,7 @@ func (c *ipamController) maybePerformSync() error {
 func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 	// Update the raw block store.
 	blockCIDR := kvp.Key.(model.BlockKey).CIDR.String()
-	log.WithField("block", blockCIDR).Info("Received block update")
+	log.WithField("block", blockCIDR).Debug("Received block update")
 	b := kvp.Value.(*model.AllocationBlock)
 	c.allBlocks[blockCIDR] = kvp
 
@@ -308,9 +340,6 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 			}
 		}
 	}
-
-	// Kick the sync channel to trigger a resync.
-	kick(c.syncChan)
 }
 
 func (c *ipamController) onBlockDeleted(key model.BlockKey) {
@@ -328,13 +357,10 @@ func (c *ipamController) onBlockDeleted(key model.BlockKey) {
 
 	// Delete the block.
 	delete(c.allocationsByBlock, key.CIDR.String())
-
-	// Kick the sync channel to trigger a resync.
-	kick(c.syncChan)
 }
 
 func (c *ipamController) updateMetrics() {
-	log.Debug("gathering latest IPAM state")
+	log.Debug("Gathering latest IPAM state for metrics")
 
 	// Keep track of various counts so that we can report them as metrics.
 	blocksByNode := map[string]int{}
@@ -385,6 +411,7 @@ func (c *ipamController) updateMetrics() {
 	for node, num := range borrowedIPsByNode {
 		borrowedGauge.WithLabelValues(node).Set(float64(num))
 	}
+	log.Debug("IPAM metrics updated")
 }
 
 // reviewIPAMState scans Calico IPAM and determines if any IPs appear to be leaks, and if any nodes should have their
@@ -562,18 +589,18 @@ func (c *ipamController) allocationIsValid(a *allocation, knode string) bool {
 		for _, nw := range wep.Spec.IPNetworks {
 			ip, _, err := net.ParseCIDR(nw)
 			if err != nil {
-				log.WithError(err).Error("Failed to parse IP, assume allocation is valid")
+				logc.WithError(err).Error("Failed to parse IP, assume allocation is valid")
 				return true
 			}
 			if ip.String() == a.ip {
 				// Found a match.
-				log.Debugf("Pod has matching IP, allocation is valid")
+				logc.Debugf("Pod has matching IP, allocation is valid")
 				return true
 			}
 		}
 	}
 
-	log.Debugf("Allocated IP no longer in-use by pod")
+	logc.Debugf("Allocated IP no longer in-use by pod")
 	return false
 }
 
