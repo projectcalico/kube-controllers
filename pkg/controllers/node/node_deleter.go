@@ -21,6 +21,7 @@ import (
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/workqueue"
@@ -88,13 +89,20 @@ func (c *nodeDeleter) deleteStaleNodes() error {
 			continue
 		}
 		if k8sNodeName != "" && !kNodeIdx[k8sNodeName] {
-			// No matching Kubernetes node with that name
+			// No matching Kubernetes node with that name.
 			time.Sleep(c.rl.When(RateLimitCalicoDelete))
-			_, err := c.client.Nodes().Delete(context.TODO(), node.Name, options.DeleteOptions{})
-			if _, doesNotExist := err.(cerrors.ErrorResourceDoesNotExist); err != nil && !doesNotExist {
-				// We hit an error other than "does not exist".
-				log.WithError(err).Errorf("Error deleting Calico node: %v", node.Name)
-				return err
+
+			// Re-confirm that the node is actaully missing. This minimizes the potential that the node was
+			// deleted and then re-created between the initial List() call above, and the decision to delete the
+			// node here.
+			_, err := c.clientset.CoreV1().Nodes().Get(context.TODO(), k8sNodeName, metav1.GetOptions{})
+			if errors.IsNotFound(err) {
+				_, err = c.client.Nodes().Delete(context.TODO(), node.Name, options.DeleteOptions{})
+				if _, doesNotExist := err.(cerrors.ErrorResourceDoesNotExist); err != nil && !doesNotExist {
+					// We hit an error other than "does not exist".
+					log.WithError(err).Errorf("Error deleting Calico node: %v", node.Name)
+					return err
+				}
 			}
 			c.rl.Forget(RateLimitCalicoDelete)
 		}

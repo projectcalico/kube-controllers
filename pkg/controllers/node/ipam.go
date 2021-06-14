@@ -33,6 +33,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -43,6 +44,12 @@ var (
 	ipsGauge      *prometheus.GaugeVec
 	blocksGauge   *prometheus.GaugeVec
 	borrowedGauge *prometheus.GaugeVec
+)
+
+const (
+	// Length of the block update channel and the max blocks to handle in a batch
+	// before kicking off a sync.
+	blockUpdateBatchSize = 1000
 )
 
 func registerPrometheusMetrics() {
@@ -75,15 +82,17 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs *
 		config:    cfg,
 		rl:        workqueue.DefaultControllerRateLimiter(),
 
-		syncChan:    make(chan interface{}, 1),
-		blockUpdate: make(chan model.KVPair),
-		nodeUpdate:  make(chan model.KVPair),
+		syncChan:     make(chan interface{}, 1),
+		blockUpdate:  make(chan model.KVPair, blockUpdateBatchSize),
+		nodeUpdate:   make(chan model.KVPair),
+		statusUpdate: make(chan bapi.SyncStatus),
 
 		allBlocks:                   make(map[string]model.KVPair),
 		allocationsByBlock:          make(map[string]map[string]*allocation),
 		allocationsByNode:           make(map[string]map[string]*allocation),
 		kubernetesNodesByCalicoName: make(map[string]string),
 		confirmedLeaks:              make(map[string]*allocation),
+		podCache:                    make(map[string]*v1.Pod),
 	}
 
 }
@@ -103,8 +112,9 @@ type ipamController struct {
 	syncChan chan interface{}
 
 	// For block update / deletion events.
-	blockUpdate chan model.KVPair
-	nodeUpdate  chan model.KVPair
+	blockUpdate  chan model.KVPair
+	nodeUpdate   chan model.KVPair
+	statusUpdate chan bapi.SyncStatus
 
 	// Raw block storage.
 	allBlocks map[string]model.KVPair
@@ -113,6 +123,9 @@ type ipamController struct {
 	allocationsByBlock map[string]map[string]*allocation
 	allocationsByNode  map[string]map[string]*allocation
 	confirmedLeaks     map[string]*allocation
+
+	// Cache pods to avoid unnecessary API queries.
+	podCache map[string]*v1.Pod
 }
 
 func (c *ipamController) Start(stop chan struct{}) {
@@ -126,11 +139,7 @@ func (c *ipamController) RegisterWith(f *DataFeed) {
 }
 
 func (c *ipamController) onStatusUpdate(s bapi.SyncStatus) {
-	c.syncStatus = s
-	switch s {
-	case bapi.InSync:
-		kick(c.syncChan)
-	}
+	c.statusUpdate <- s
 }
 
 func (c *ipamController) onUpdate(update bapi.Update) {
@@ -155,6 +164,12 @@ func (c *ipamController) OnKubernetesNodeDeleted() {
 	kick(c.syncChan)
 }
 
+func (c *ipamController) OnKubernetesPodUpdated(key string, p *v1.Pod) {
+}
+
+func (c *ipamController) OnKubernetesPodDeleted(key string) {
+}
+
 // acceptScheduleRequests is the main worker routine of the IPAM controller. It monitors
 // the updates channel and triggers syncs.
 func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
@@ -168,6 +183,13 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 	for {
 		// Wait until something wakes us up, or we are stopped
 		select {
+		case s := <-c.statusUpdate:
+			c.syncStatus = s
+			switch s {
+			case bapi.InSync:
+				log.WithField("status", s).Info("Syncer is InSync, kicking sync channel")
+				kick(c.syncChan)
+			}
 		case kvp := <-c.nodeUpdate:
 			log.Debug("Node update received")
 			if kvp.Value != nil {
@@ -199,7 +221,7 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 			// It's possible we get a rapid series of block updates in a row. Use
 			// a consolidation loop to handle "batches" of block updates before triggering a sync.
 			var i int
-			for i = 1; i < 1000; i++ {
+			for i = 1; i < blockUpdateBatchSize; i++ {
 				select {
 				case kvp = <-c.blockUpdate:
 					c.handleBlockUpdate(kvp)
@@ -340,6 +362,9 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 			if node := alloc.node(); node != "" {
 				delete(c.allocationsByNode[node], handle)
 			}
+
+			// And to be safe, remove from confirmed leaks just in case.
+			delete(c.confirmedLeaks, handle)
 		}
 	}
 }
@@ -444,7 +469,7 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 		knode, err := c.kubernetesNodeForCalico(cnode)
 		if err != nil {
 			if _, ok := err.(*ErrorNotKubernetes); !ok {
-				log.WithError(err).Info("Skipping non-kubernetes node")
+				log.Debug("Skipping non-kubernetes node")
 			} else {
 				log.WithError(err).Warnf("Failed to lookup corresponding node, skipping %s", cnode)
 			}
@@ -541,7 +566,7 @@ func (c *ipamController) allocationIsValid(a *allocation, knode string) bool {
 		// Allocation is either not a pod address, or it pre-dates the use of these
 		// attributes. Assume it's a valid allocation since we can't perform our
 		// confidence checks below.
-		logc.Info("IP allocation is missing metadata, cannot confirm or deny validity. Assume valid.")
+		logc.Debug("IP allocation is missing metadata, cannot confirm or deny validity. Assume valid.")
 		return true
 	}
 
@@ -594,10 +619,16 @@ func (c *ipamController) allocationIsValid(a *allocation, knode string) bool {
 		for _, nw := range wep.Spec.IPNetworks {
 			ip, _, err := net.ParseCIDR(nw)
 			if err != nil {
-				logc.WithError(err).Error("Failed to parse IP, assume allocation is valid")
+				logc.WithError(err).Error("Failed to parse wep IP, assume allocation is valid")
 				return true
 			}
-			if ip.String() == a.ip {
+			allocIP := net.ParseIP(a.ip)
+			if allocIP == nil {
+				logc.WithField("ip", a.ip).Error("Failed to parse IP, assume allocation is valid")
+				return true
+			}
+
+			if allocIP.Equal(ip) {
 				// Found a match.
 				logc.Debugf("Pod has matching IP, allocation is valid")
 				return true
@@ -650,23 +681,26 @@ func (c *ipamController) syncIPAM() error {
 // garbageCollectIPs checks all known allocations and GCs any confirmed leaks.
 func (c *ipamController) garbageCollectIPs() error {
 	for handle, a := range c.confirmedLeaks {
-		if a.isConfirmedLeak() {
-			logc := log.WithFields(a.fields())
-			logc.Info("Garbage collecting leaked IP address")
-			if err := c.client.IPAM().ReleaseByHandle(context.TODO(), a.handle); err != nil {
-				if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
-					logc.WithField("handle", a.handle).Debug("IP already released")
-					continue
-				}
-				logc.WithError(err).WithField("handle", a.handle).Warning("Failed to release leaked IP")
-				return err
-			}
-
-			// No longer a leak. Remove it from the map here so we're not dependent on receiving
-			// the update from the syncer (which we will do eventually, this is just cleaner).
-			delete(c.allocationsByNode[a.node()], handle)
-			delete(c.confirmedLeaks, handle)
+		logc := log.WithFields(a.fields())
+		if !a.isConfirmedLeak() {
+			logc.Info("Leaked IP has been resurrected")
+			continue
 		}
+
+		logc.Info("Garbage collecting leaked IP address")
+		if err := c.client.IPAM().ReleaseByHandle(context.TODO(), a.handle); err != nil {
+			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
+				logc.WithField("handle", a.handle).Debug("IP already released")
+				continue
+			}
+			logc.WithError(err).WithField("handle", a.handle).Warning("Failed to release leaked IP")
+			return err
+		}
+
+		// No longer a leak. Remove it from the map here so we're not dependent on receiving
+		// the update from the syncer (which we will do eventually, this is just cleaner).
+		delete(c.allocationsByNode[a.node()], handle)
+		delete(c.confirmedLeaks, handle)
 	}
 	return nil
 }

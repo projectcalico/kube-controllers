@@ -19,14 +19,13 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	uruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/projectcalico/kube-controllers/pkg/config"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/controller"
+	"github.com/projectcalico/kube-controllers/pkg/converter"
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 )
@@ -52,8 +51,8 @@ type NodeController struct {
 	ctx context.Context
 
 	// For syncing node objects from the k8s API.
-	informer     cache.Controller
-	indexer      cache.Indexer
+	nodeInformer cache.SharedIndexInformer
+	podInformer  cache.SharedIndexInformer
 	k8sClientset *kubernetes.Clientset
 
 	// For accessing Calico datastore.
@@ -65,16 +64,19 @@ type NodeController struct {
 }
 
 // NewNodeController Constructor for NodeController
-func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, calicoClient client.Interface, cfg config.NodeControllerConfig) controller.Controller {
+func NewNodeController(ctx context.Context,
+	k8sClientset *kubernetes.Clientset,
+	calicoClient client.Interface,
+	cfg config.NodeControllerConfig,
+	nodeInformer, podInformer cache.SharedIndexInformer) controller.Controller {
 	nc := &NodeController{
 		ctx:          ctx,
 		calicoClient: calicoClient,
 		k8sClientset: k8sClientset,
 		dataFeed:     NewDataFeed(calicoClient),
+		nodeInformer: nodeInformer,
+		podInformer:  podInformer,
 	}
-
-	// Create a Node watcher.
-	listWatcher := cache.NewListWatchFromClient(k8sClientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())
 
 	// Store functions to call on node deletion.
 	nodeDeletionFuncs := []func(){}
@@ -93,14 +95,51 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 		nodeDeletionFuncs = append(nodeDeletionFuncs, nodeDeletionController.OnKubernetesNodeDeleted)
 	}
 
-	// Setup event handlers
-	handlers := cache.ResourceEventHandlerFuncs{
+	// Setup event handlers for nodes and pods learned through the
+	// respective informers.
+	nodeHandlers := cache.ResourceEventHandlerFuncs{
 		DeleteFunc: func(obj interface{}) {
 			// Call all of the registered node deletion funcs.
 			for _, f := range nodeDeletionFuncs {
 				f()
 			}
 		}}
+
+	podHandlers := cache.ResourceEventHandlerFuncs{}
+	podHandlers.AddFunc = func(obj interface{}) {
+		key, err := cache.MetaNamespaceKeyFunc(obj)
+		if err != nil {
+			log.WithError(err).Error("Failed to generate key")
+			return
+		}
+		pod, err := converter.ExtractPodFromUpdate(obj)
+		if err != nil {
+			log.WithError(err).Error("Failed to extract pod")
+			return
+		}
+		nc.ipamCtrl.OnKubernetesPodUpdated(key, pod)
+	}
+	podHandlers.UpdateFunc = func(_, obj interface{}) {
+		key, err := cache.MetaNamespaceKeyFunc(obj)
+		if err != nil {
+			log.WithError(err).Error("Failed to generate key")
+			return
+		}
+		pod, err := converter.ExtractPodFromUpdate(obj)
+		if err != nil {
+			log.WithError(err).Error("Failed to extract pod")
+			return
+		}
+		nc.ipamCtrl.OnKubernetesPodUpdated(key, pod)
+	}
+	podHandlers.DeleteFunc = func(obj interface{}) {
+		key, err := cache.MetaNamespaceKeyFunc(obj)
+		if err != nil {
+			log.WithError(err).Error("Failed to generate key")
+			return
+		}
+		nc.ipamCtrl.OnKubernetesPodDeleted(key)
+	}
 
 	// Create the Auto HostEndpoint sub-controller and register it to receive data.
 	// We always launch this controller, even if auto-HEPs are disabled, since the controller
@@ -118,13 +157,13 @@ func NewNodeController(ctx context.Context, k8sClientset *kubernetes.Clientset, 
 
 		// Hook the node label controller into the node informer so we are notified
 		// when Kubernetes node labels change.
-		handlers.AddFunc = func(obj interface{}) { nodeLabelCtrl.OnKubernetesNodeUpdate(obj) }
-		handlers.UpdateFunc = func(_, obj interface{}) { nodeLabelCtrl.OnKubernetesNodeUpdate(obj) }
+		nodeHandlers.AddFunc = func(obj interface{}) { nodeLabelCtrl.OnKubernetesNodeUpdate(obj) }
+		nodeHandlers.UpdateFunc = func(_, obj interface{}) { nodeLabelCtrl.OnKubernetesNodeUpdate(obj) }
 	}
 
-	// Informer handles managing the watch and signals us when nodes are deleted.
-	// also syncs up labels between k8s/calico node objects
-	nc.indexer, nc.informer = cache.NewIndexerInformer(listWatcher, &v1.Node{}, 0, handlers, cache.Indexers{})
+	// Set the handlers on the informers.
+	nc.nodeInformer.AddEventHandler(nodeHandlers)
+	nc.podInformer.AddEventHandler(podHandlers)
 
 	// Start the Calico data feed.
 	nc.dataFeed.Start()
@@ -153,12 +192,13 @@ func (c *NodeController) Run(stopCh chan struct{}) {
 	registerPrometheusMetrics()
 
 	// Wait till k8s cache is synced
-	go c.informer.Run(stopCh)
-	log.Debug("Waiting to sync with Kubernetes API (Nodes)")
-	for !c.informer.HasSynced() {
+	log.Debug("Waiting to sync with Kubernetes API (Nodes and Pods)")
+	for !c.nodeInformer.HasSynced() || !c.podInformer.HasSynced() {
+		f := log.Fields{"node": c.nodeInformer.HasSynced(), "pod": c.podInformer.HasSynced()}
+		log.WithFields(f).Info("Waiting for sync")
 		time.Sleep(100 * time.Millisecond)
 	}
-	log.Debug("Finished syncing with Kubernetes API (Nodes)")
+	log.Debug("Finished syncing with Kubernetes API (Nodes and Pods)")
 
 	// We're in-sync. Start the sub-controllers.
 	c.ipamCtrl.Start(stopCh)
