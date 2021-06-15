@@ -195,7 +195,7 @@ func (c *NodeController) Run(stopCh chan struct{}) {
 	log.Debug("Waiting to sync with Kubernetes API (Nodes and Pods)")
 	for !c.nodeInformer.HasSynced() || !c.podInformer.HasSynced() {
 		f := log.Fields{"node": c.nodeInformer.HasSynced(), "pod": c.podInformer.HasSynced()}
-		log.WithFields(f).Info("Waiting for sync")
+		log.WithFields(f).Debug("Waiting for sync")
 		time.Sleep(100 * time.Millisecond)
 	}
 	log.Debug("Finished syncing with Kubernetes API (Nodes and Pods)")

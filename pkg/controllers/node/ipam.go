@@ -16,6 +16,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -47,9 +48,9 @@ var (
 )
 
 const (
-	// Length of the block update channel and the max blocks to handle in a batch
+	// Length of the update channel and the max items to handle in a batch
 	// before kicking off a sync.
-	blockUpdateBatchSize = 1000
+	batchUpdateSize = 1000
 )
 
 func registerPrometheusMetrics() {
@@ -83,9 +84,12 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs *
 		rl:        workqueue.DefaultControllerRateLimiter(),
 
 		syncChan:     make(chan interface{}, 1),
-		blockUpdate:  make(chan model.KVPair, blockUpdateBatchSize),
-		nodeUpdate:   make(chan model.KVPair),
 		statusUpdate: make(chan bapi.SyncStatus),
+
+		// Buffered channels for potentially bursty channels.
+		blockUpdate: make(chan model.KVPair, batchUpdateSize),
+		nodeUpdate:  make(chan model.KVPair, 1000),
+		podUpdate:   make(chan podUpdate, 1000),
 
 		allBlocks:                   make(map[string]model.KVPair),
 		allocationsByBlock:          make(map[string]map[string]*allocation),
@@ -95,6 +99,11 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs *
 		podCache:                    make(map[string]*v1.Pod),
 	}
 
+}
+
+type podUpdate struct {
+	key string
+	pod *v1.Pod
 }
 
 type ipamController struct {
@@ -115,6 +124,7 @@ type ipamController struct {
 	blockUpdate  chan model.KVPair
 	nodeUpdate   chan model.KVPair
 	statusUpdate chan bapi.SyncStatus
+	podUpdate    chan podUpdate
 
 	// Raw block storage.
 	allBlocks map[string]model.KVPair
@@ -165,9 +175,11 @@ func (c *ipamController) OnKubernetesNodeDeleted() {
 }
 
 func (c *ipamController) OnKubernetesPodUpdated(key string, p *v1.Pod) {
+	c.podUpdate <- podUpdate{key: key, pod: p}
 }
 
 func (c *ipamController) OnKubernetesPodDeleted(key string) {
+	c.podUpdate <- podUpdate{key: key}
 }
 
 // acceptScheduleRequests is the main worker routine of the IPAM controller. It monitors
@@ -179,10 +191,24 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 		period = c.config.LeakGracePeriod.Duration / 2
 	}
 	t := time.NewTicker(period)
-	log.Info("Will run periodic IPAM sync every %s", period)
+	log.Infof("Will run periodic IPAM sync every %s", period)
 	for {
 		// Wait until something wakes us up, or we are stopped
 		select {
+		case pu := <-c.podUpdate:
+			c.handlePodUpdate(pu)
+
+			// It's possible we get a rapid series of updates in a row. Use
+			// a consolidation loop to handle "batches" of updates before triggering a sync.
+			var i int
+			for i = 1; i < batchUpdateSize; i++ {
+				select {
+				case pu = <-c.podUpdate:
+					c.handlePodUpdate(pu)
+				default:
+					break
+				}
+			}
 		case s := <-c.statusUpdate:
 			c.syncStatus = s
 			switch s {
@@ -191,37 +217,26 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 				kick(c.syncChan)
 			}
 		case kvp := <-c.nodeUpdate:
-			log.Debug("Node update received")
-			if kvp.Value != nil {
-				n := kvp.Value.(*apiv3.Node)
-				kn, err := getK8sNodeName(*n)
-				if err != nil {
-					log.WithError(err).Info("Unable to get corresponding k8s node name, skipping")
-				} else if kn != "" {
-					if current, ok := c.kubernetesNodesByCalicoName[n.Name]; !ok {
-						logrus.Debugf("Add mapping calico node -> k8s node. %s -> %s", n.Name, kn)
-						c.kubernetesNodesByCalicoName[n.Name] = kn
-					} else if current != kn {
-						logrus.Warnf("Update mapping calico node -> k8s node. %s -> %s (previously %s)", n.Name, kn, current)
-						c.kubernetesNodesByCalicoName[n.Name] = kn
-					}
-					// No change.
-				}
-			} else {
-				cnode := kvp.Key.(model.ResourceKey).Name
-				if _, ok := c.kubernetesNodesByCalicoName[cnode]; ok {
-					logrus.Debugf("Remove mapping for calico node %s", cnode)
-					delete(c.kubernetesNodesByCalicoName, cnode)
+			c.handleNodeUpdate(kvp)
+
+			// It's possible we get a rapid series of updates in a row. Use
+			// a consolidation loop to handle "batches" of updates before triggering a sync.
+			var i int
+			for i = 1; i < batchUpdateSize; i++ {
+				select {
+				case kvp = <-c.nodeUpdate:
+					c.handleNodeUpdate(kvp)
+				default:
+					break
 				}
 			}
-			log.Debug("Node update complete")
 		case kvp := <-c.blockUpdate:
 			c.handleBlockUpdate(kvp)
 
-			// It's possible we get a rapid series of block updates in a row. Use
-			// a consolidation loop to handle "batches" of block updates before triggering a sync.
+			// It's possible we get a rapid series of updates in a row. Use
+			// a consolidation loop to handle "batches" of updates before triggering a sync.
 			var i int
-			for i = 1; i < blockUpdateBatchSize; i++ {
+			for i = 1; i < batchUpdateSize; i++ {
 				select {
 				case kvp = <-c.blockUpdate:
 					c.handleBlockUpdate(kvp)
@@ -264,13 +279,46 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 
 // handleBlockUpdate wraps up the logic to execute when receiving a block update.
 func (c *ipamController) handleBlockUpdate(kvp model.KVPair) {
-	log.Debug("Handling blockUpdate")
 	if kvp.Value != nil {
 		c.onBlockUpdated(kvp)
 	} else {
 		c.onBlockDeleted(kvp.Key.(model.BlockKey))
 	}
-	log.Debug("Handled blockUpdate")
+}
+
+// handleNodeUpdate wraps up the logic to execute when receiving a node update.
+func (c *ipamController) handleNodeUpdate(kvp model.KVPair) {
+	if kvp.Value != nil {
+		n := kvp.Value.(*apiv3.Node)
+		kn, err := getK8sNodeName(*n)
+		if err != nil {
+			log.WithError(err).Info("Unable to get corresponding k8s node name, skipping")
+		} else if kn != "" {
+			if current, ok := c.kubernetesNodesByCalicoName[n.Name]; !ok {
+				logrus.Debugf("Add mapping calico node -> k8s node. %s -> %s", n.Name, kn)
+				c.kubernetesNodesByCalicoName[n.Name] = kn
+			} else if current != kn {
+				logrus.Warnf("Update mapping calico node -> k8s node. %s -> %s (previously %s)", n.Name, kn, current)
+				c.kubernetesNodesByCalicoName[n.Name] = kn
+			}
+			// No change.
+		}
+	} else {
+		cnode := kvp.Key.(model.ResourceKey).Name
+		if _, ok := c.kubernetesNodesByCalicoName[cnode]; ok {
+			logrus.Debugf("Remove mapping for calico node %s", cnode)
+			delete(c.kubernetesNodesByCalicoName, cnode)
+		}
+	}
+}
+
+// handlePodUpdate wraps up the logic to execute when receiving a pod update.
+func (c *ipamController) handlePodUpdate(pu podUpdate) {
+	if pu.pod != nil {
+		c.podCache[pu.key] = pu.pod
+	} else {
+		delete(c.podCache, pu.key)
+	}
 }
 
 func (c *ipamController) maybePerformSync() error {
@@ -488,12 +536,22 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 		}
 		logc.Debug("Checking node")
 
+		// Tunnel addresses are special - they should only be marked as a leak if the node itself
+		// is deleted, and there are no other valid allocations on the node. Keep track of them
+		// in this slice so we can mark them for GC when we decide if the node should be cleaned up
+		// or not.
+		tunnelAddresses := []*allocation{}
+
 		// To increase our confidence, go through each IP address and
 		// check to see if the pod it references exists. If all the pods on that node are gone,
 		// we can delete it. If any pod still exists, we skip this node. We want to be
 		// extra sure that the node is gone before we clean it up.
 		canDelete := true
 		for _, a := range allocations {
+			// Set the Kubernetes node field now that we know the kubernetes node name
+			// for this allocation.
+			a.knode = knode
+
 			logc = log.WithFields(a.fields())
 			if a.isWindowsReserved() {
 				// Windows reserved IPs don't need garbage collection. They get released automatically when
@@ -511,14 +569,17 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 				canDelete = false
 				continue
 			}
-			if a.isTunnelAddress() && kubernetesNodeExists {
-				// We only GC tunnel addresses if the node has been deleted.
+
+			if a.isTunnelAddress() {
+				// Handle tunnel addresses below.
+				tunnelAddresses = append(tunnelAddresses, a)
 				continue
 			}
 
-			// Check if the allocation is still valid.
-			if knode != "" && c.allocationIsValid(a, knode) {
-				// Allocation is still valid.
+			if c.allocationIsValid(a, true) {
+				// Allocation is still valid. We can't cleanup the node yet, even
+				// if it appears to be deleted, because the allocation's validity breaks
+				// our confidence.
 				canDelete = false
 				a.markValid()
 				continue
@@ -529,14 +590,16 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 				// - There pod owning this allocation no longer exists.
 				a.markConfirmedLeak()
 			} else if c.config.LeakGracePeriod != nil {
-				// The Kubernetes node still exists, so our confidence is lower.
+				// The allocation is NOT valid, but the Kubernetes node still exists, so our confidence is lower.
 				// Mark as a candidate leak. If this state remains, it will switch
 				// to confirmed after the grace period.
 				a.markLeak(c.config.LeakGracePeriod.Duration)
 			}
 
-			// If the address is determined to be a confirmed leak, add it to the index.
-			c.confirmedLeaks[a.handle] = a
+			if a.isConfirmedLeak() {
+				// If the address is determined to be a confirmed leak, add it to the index.
+				c.confirmedLeaks[a.handle] = a
+			}
 		}
 
 		if !kubernetesNodeExists {
@@ -544,6 +607,12 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 				// There are still valid allocations on the node.
 				logc.Infof("Can't cleanup node yet - IPs still in use on this node")
 				continue
+			}
+
+			// Mark the node's tunnel addresses for GC.
+			for _, a := range tunnelAddresses {
+				a.markConfirmedLeak()
+				c.confirmedLeaks[a.handle] = a
 			}
 
 			// The node is ready have its IPAM affinities released. It exists in Calico IPAM, but
@@ -557,10 +626,15 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 
 // allocationIsValid returns true if the allocation is still in use, and false if the allocation
 // appears to be leaked.
-func (c *ipamController) allocationIsValid(a *allocation, knode string) bool {
+func (c *ipamController) allocationIsValid(a *allocation, preferCache bool) bool {
 	ns := a.attrs[ipam.AttributeNamespace]
 	pod := a.attrs[ipam.AttributePod]
 	logc := log.WithFields(a.fields())
+
+	if a.isTunnelAddress() {
+		// Tunnel addresses are only valid if the hosting node still exists.
+		return a.knode != ""
+	}
 
 	if ns == "" || pod == "" {
 		// Allocation is either not a pod address, or it pre-dates the use of these
@@ -570,23 +644,37 @@ func (c *ipamController) allocationIsValid(a *allocation, knode string) bool {
 		return true
 	}
 
-	// Query the pod referenced by this allocation.
-	p, err := c.clientset.CoreV1().Pods(ns).Get(context.Background(), pod, metav1.GetOptions{})
-	if err != nil {
-		if !errors.IsNotFound(err) {
-			log.WithError(err).Warn("Failed to query pod, assume it exists and allocation is valid")
-			return true
+	// Query the pod referenced by this allocation. If preferCache is true, then check the cache first.
+	var err error
+	var p *v1.Pod
+	key := fmt.Sprintf("%s/%s", ns, pod)
+	if preferCache {
+		logc.Debug("Checking cache for pod")
+		p = c.podCache[key]
+	}
+	if p == nil {
+		logc.Debug("Querying Kubernetes API for pod")
+		p, err = c.clientset.CoreV1().Pods(ns).Get(context.Background(), pod, metav1.GetOptions{})
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				log.WithError(err).Warn("Failed to query pod, assume it exists and allocation is valid")
+				return true
+			}
+			// Pod not found. Assume this is a leak.
+			logc.Debug("Pod not found, assume it's a leak")
+			return false
 		}
-		// Pod not found. Assume this is a leak.
-		return false
+
+		// Proactively eep our cache up-to-date.
+		c.podCache[key] = p
 	}
 
 	// The pod exists - check if it is still on the original node.
 	// TODO: Do we need this check?
-	if p.Spec.NodeName != "" && knode != "" && p.Spec.NodeName != knode {
+	if p.Spec.NodeName != "" && a.knode != "" && p.Spec.NodeName != a.knode {
 		// If the pod has been rescheduled to a new node, we can treat the old allocation as
 		// gone and clean it up.
-		fields := log.Fields{"old": knode, "new": p.Spec.NodeName}
+		fields := log.Fields{"old": a.knode, "new": p.Spec.NodeName}
 		logc.WithFields(fields).Info("Pod rescheduled on new node. Allocation no longer valid")
 		return false
 	}
@@ -682,7 +770,10 @@ func (c *ipamController) syncIPAM() error {
 func (c *ipamController) garbageCollectIPs() error {
 	for handle, a := range c.confirmedLeaks {
 		logc := log.WithFields(a.fields())
-		if !a.isConfirmedLeak() {
+
+		// Final check that the allocation is leaked, this time ignoring our cache
+		// to make sure we're working with up-to-date information.
+		if c.allocationIsValid(a, false) {
 			logc.Info("Leaked IP has been resurrected")
 			continue
 		}
