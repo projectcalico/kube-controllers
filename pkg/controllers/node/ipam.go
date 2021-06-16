@@ -98,26 +98,16 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs k
 
 		allBlocks:                   make(map[string]model.KVPair),
 		allocationsByBlock:          make(map[string]map[string]*allocation),
+		allocationsByNode:           make(map[string]map[string]*allocation),
 		kubernetesNodesByCalicoName: make(map[string]string),
 		confirmedLeaks:              make(map[string]*allocation),
 		podCache:                    make(map[string]*v1.Pod),
-
-		// allocationsByNode stores all known allocations indexed by their node
-		// and handle. A node will be entered into this map if there is any IPAM
-		// data associated with it - either an affine block (even if empty), or an allocation (whether or not the
-		// allocation itself is within a block affine to the node).
-		allocationsByNode: make(map[string]map[string]*allocation),
-		nodesByBlock:      make(map[string]string),
+		nodesByBlock:                make(map[string]string),
 
 		// For unit testing purposes.
-		readState: make(chan stateRequest),
+		pauseRequestChannel: make(chan pauseRequest),
 	}
 
-}
-
-type podUpdate struct {
-	key string
-	pod *v1.Pod
 }
 
 type ipamController struct {
@@ -153,7 +143,7 @@ type ipamController struct {
 	podCache map[string]*v1.Pod
 
 	// For unit testing purposes.
-	readState chan stateRequest
+	pauseRequestChannel chan pauseRequest
 }
 
 func (c *ipamController) Start(stop chan struct{}) {
@@ -292,7 +282,7 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 			// TODO: Do we need / want to do this every sync? Can we batch?
 			c.updateMetrics()
 			log.Debug("Triggered IPAM sync complete")
-		case req := <-c.readState:
+		case req := <-c.pauseRequestChannel:
 			// For testing purposes - allow the tests to pause the main processing loop.
 			log.Warn("Pausing main loop so tests can read state")
 			req.pauseConfirmed <- struct{}{}
@@ -348,7 +338,6 @@ func (c *ipamController) handlePodUpdate(pu podUpdate) {
 }
 
 func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
-	// Update the raw block store.
 	blockCIDR := kvp.Key.(model.BlockKey).CIDR.String()
 	log.WithField("block", blockCIDR).Debug("Received block update")
 	b := kvp.Value.(*model.AllocationBlock)
@@ -360,9 +349,6 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 		if strings.HasPrefix(*b.Affinity, "host:") {
 			n := strings.TrimPrefix(*b.Affinity, "host:")
 			c.nodesByBlock[blockCIDR] = n
-			// if _, ok := c.allocationsByNode[n]; !ok {
-			// 	c.allocationsByNode[n] = map[string]*allocation{}
-			// }
 		}
 	} else {
 		// Affinity may have been removed.
@@ -437,7 +423,6 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 }
 
 func (c *ipamController) onBlockDeleted(key model.BlockKey) {
-	// Update the raw block store.
 	blockCIDR := key.CIDR.String()
 	log.WithField("block", blockCIDR).Info("Received block delete")
 
@@ -499,9 +484,7 @@ func (c *ipamController) updateMetrics() {
 	// Update prometheus metrics.
 	ipsGauge.Reset()
 	for node, allocations := range c.allocationsByNode {
-		if num := len(allocations); num != 0 {
-			ipsGauge.WithLabelValues(node).Set(float64(num))
-		}
+		ipsGauge.WithLabelValues(node).Set(float64(len(allocations)))
 	}
 	blocksGauge.Reset()
 	for node, num := range blocksByNode {
@@ -540,7 +523,7 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 		nodesAndAllocations[node] = nil
 	}
 	for node, allocations := range c.allocationsByNode {
-		// For each allocation, add an entry. This make sure we condier them even
+		// For each allocation, add an entry. This make sure we consider them even
 		// if the node has no affine blocks.
 		nodesAndAllocations[node] = allocations
 	}
@@ -900,9 +883,21 @@ func ordinalToIP(b *model.AllocationBlock, ord int) net.IP {
 	return b.OrdinalToIP(ord).IP
 }
 
-type stateRequest struct {
+// podUpdate is an internal struct used to send information about new, updated,
+// or deleted pods to the main worker goroutine in respsonse to calls from the
+// informer.
+type podUpdate struct {
+	key string
+	pod *v1.Pod
+}
+
+// pauseRequest is used internally for testing.
+type pauseRequest struct {
+	// pauseConfirmed is sent a signal when the main loop is paused.
 	pauseConfirmed chan struct{}
-	doneChan       chan struct{}
+
+	// doneChan can be used to un-pause the main loop.
+	doneChan chan struct{}
 }
 
 // pause pauses the controller's main loop until the returned function is called.
@@ -911,7 +906,7 @@ type stateRequest struct {
 func (c *ipamController) pause() func() {
 	doneChan := make(chan struct{})
 	pauseConfirmed := make(chan struct{})
-	c.readState <- stateRequest{doneChan: doneChan, pauseConfirmed: pauseConfirmed}
+	c.pauseRequestChannel <- pauseRequest{doneChan: doneChan, pauseConfirmed: pauseConfirmed}
 	<-pauseConfirmed
 	return func() {
 		doneChan <- struct{}{}
