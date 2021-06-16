@@ -45,6 +45,8 @@ var (
 	ipsGauge      *prometheus.GaugeVec
 	blocksGauge   *prometheus.GaugeVec
 	borrowedGauge *prometheus.GaugeVec
+
+	metricsRegistered bool
 )
 
 const (
@@ -54,29 +56,32 @@ const (
 )
 
 func registerPrometheusMetrics() {
-	// Total IP allocations.
-	ipsGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "ipam_allocations_per_node",
-		Help: "Number of IPs allocated",
-	}, []string{"node"})
-	prometheus.MustRegister(ipsGauge)
+	if !metricsRegistered {
+		// Total IP allocations.
+		ipsGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ipam_allocations_per_node",
+			Help: "Number of IPs allocated",
+		}, []string{"node"})
+		prometheus.MustRegister(ipsGauge)
 
-	// Borrowed IPs.
-	borrowedGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "ipam_allocations_borrowed_per_node",
-		Help: "Number of allocated IPs that are from non-affine blocks.",
-	}, []string{"node"})
-	prometheus.MustRegister(borrowedGauge)
+		// Borrowed IPs.
+		borrowedGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ipam_allocations_borrowed_per_node",
+			Help: "Number of allocated IPs that are from non-affine blocks.",
+		}, []string{"node"})
+		prometheus.MustRegister(borrowedGauge)
 
-	// Blocks per-node.
-	blocksGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "ipam_blocks_per_node",
-		Help: "Number of blocks in IPAM",
-	}, []string{"node"})
-	prometheus.MustRegister(blocksGauge)
+		// Blocks per-node.
+		blocksGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ipam_blocks_per_node",
+			Help: "Number of blocks in IPAM",
+		}, []string{"node"})
+		prometheus.MustRegister(blocksGauge)
+	}
+	metricsRegistered = true
 }
 
-func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs *kubernetes.Clientset) *ipamController {
+func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs kubernetes.Interface) *ipamController {
 	return &ipamController{
 		client:    c,
 		clientset: cs,
@@ -93,10 +98,19 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs *
 
 		allBlocks:                   make(map[string]model.KVPair),
 		allocationsByBlock:          make(map[string]map[string]*allocation),
-		allocationsByNode:           make(map[string]map[string]*allocation),
 		kubernetesNodesByCalicoName: make(map[string]string),
 		confirmedLeaks:              make(map[string]*allocation),
 		podCache:                    make(map[string]*v1.Pod),
+
+		// allocationsByNode stores all known allocations indexed by their node
+		// and handle. A node will be entered into this map if there is any IPAM
+		// data associated with it - either an affine block (even if empty), or an allocation (whether or not the
+		// allocation itself is within a block affine to the node).
+		allocationsByNode: make(map[string]map[string]*allocation),
+		nodesByBlock:      make(map[string]string),
+
+		// For unit testing purposes.
+		readState: make(chan stateRequest),
 	}
 
 }
@@ -109,7 +123,7 @@ type podUpdate struct {
 type ipamController struct {
 	rl        workqueue.RateLimiter
 	client    client.Interface
-	clientset *kubernetes.Clientset
+	clientset kubernetes.Interface
 	config    config.NodeControllerConfig
 
 	syncStatus bapi.SyncStatus
@@ -132,13 +146,20 @@ type ipamController struct {
 	// Store allocations broken out from the raw blocks by their handle.
 	allocationsByBlock map[string]map[string]*allocation
 	allocationsByNode  map[string]map[string]*allocation
+	nodesByBlock       map[string]string
 	confirmedLeaks     map[string]*allocation
 
 	// Cache pods to avoid unnecessary API queries.
 	podCache map[string]*v1.Pod
+
+	// For unit testing purposes.
+	readState chan stateRequest
 }
 
 func (c *ipamController) Start(stop chan struct{}) {
+	// Register metrics.
+	registerPrometheusMetrics()
+
 	go c.acceptScheduleRequests(stop)
 }
 
@@ -251,7 +272,7 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 		case <-t.C:
 			// Periodic IPAM sync.
 			log.Debug("Periodic IPAM sync")
-			err := c.maybePerformSync()
+			err := c.syncIPAM()
 			if err != nil {
 				log.WithError(err).Warn("Periodic IPAM sync failed")
 			}
@@ -259,7 +280,7 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 		case <-c.syncChan:
 			// Triggered IPAM sync.
 			log.Debug("Triggered IPAM sync")
-			err := c.maybePerformSync()
+			err := c.syncIPAM()
 			if err != nil {
 				// We can kick ourselves on error for a retry. We have ratelimiting
 				// built in to the cleanup code.
@@ -271,6 +292,11 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 			// TODO: Do we need / want to do this every sync? Can we batch?
 			c.updateMetrics()
 			log.Debug("Triggered IPAM sync complete")
+		case req := <-c.readState:
+			// For testing purposes - allow the tests to pause the main processing loop.
+			log.Warn("Pausing main loop so tests can read state")
+			req.pauseConfirmed <- struct{}{}
+			<-req.doneChan
 		case <-stopCh:
 			return
 		}
@@ -321,39 +347,26 @@ func (c *ipamController) handlePodUpdate(pu podUpdate) {
 	}
 }
 
-func (c *ipamController) maybePerformSync() error {
-	// Skip if not InSync yet.
-	if c.syncStatus != bapi.InSync {
-		log.Debug("Have not yet received InSync notification, skipping IPAM sync.")
-		return nil
-	}
-
-	// This will check IPAM state for potential IP leaks, as well as
-	// look for nodes which have been deleted and should have their affinities released.
-	err := c.syncIPAM()
-	if err != nil {
-		log.WithError(err).Warn("Error in syncIPAM")
-		return err
-	}
-	return nil
-}
-
 func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 	// Update the raw block store.
 	blockCIDR := kvp.Key.(model.BlockKey).CIDR.String()
 	log.WithField("block", blockCIDR).Debug("Received block update")
 	b := kvp.Value.(*model.AllocationBlock)
-	c.allBlocks[blockCIDR] = kvp
 
 	// Include affinity if it exists. We want to track nodes even
-	// if there are no IPs actually assigned to that node.
+	// if there are no IPs actually assigned to that node so that we can
+	// release their affinity if needed.
 	if b.Affinity != nil {
 		if strings.HasPrefix(*b.Affinity, "host:") {
 			n := strings.TrimPrefix(*b.Affinity, "host:")
-			if _, ok := c.allocationsByNode[n]; !ok {
-				c.allocationsByNode[n] = map[string]*allocation{}
-			}
+			c.nodesByBlock[blockCIDR] = n
+			// if _, ok := c.allocationsByNode[n]; !ok {
+			// 	c.allocationsByNode[n] = map[string]*allocation{}
+			// }
 		}
+	} else {
+		// Affinity may have been removed.
+		delete(c.nodesByBlock, blockCIDR)
 	}
 
 	// Update allocations contributed from this block.
@@ -375,7 +388,6 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 
 		// Check if we already know about this allocation.
 		if _, ok := c.allocationsByBlock[blockCIDR][handle]; ok {
-			// Already known. TODO: Update existing allocation fields.
 			continue
 		}
 
@@ -407,31 +419,44 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 			delete(c.allocationsByBlock[blockCIDR], handle)
 
 			// Also remove from the node view.
-			if node := alloc.node(); node != "" {
+			node := alloc.node()
+			if node != "" {
 				delete(c.allocationsByNode[node], handle)
+			}
+			if len(c.allocationsByNode[node]) == 0 {
+				delete(c.allocationsByNode, node)
 			}
 
 			// And to be safe, remove from confirmed leaks just in case.
 			delete(c.confirmedLeaks, handle)
 		}
 	}
+
+	// Finally, update the raw storage.
+	c.allBlocks[blockCIDR] = kvp
 }
 
 func (c *ipamController) onBlockDeleted(key model.BlockKey) {
 	// Update the raw block store.
-	log.WithField("block", key.CIDR.String()).Info("Received block delete")
-	delete(c.allBlocks, key.CIDR.String())
+	blockCIDR := key.CIDR.String()
+	log.WithField("block", blockCIDR).Info("Received block delete")
 
-	// Update the node view.
-	allocations := c.allocationsByBlock[key.CIDR.String()]
+	// Remove allocations that were contributed by this block.
+	allocations := c.allocationsByBlock[blockCIDR]
 	for handle, alloc := range allocations {
-		if node := alloc.node(); node != "" {
+		node := alloc.node()
+		if node != "" {
 			delete(c.allocationsByNode[node], handle)
 		}
+		if len(c.allocationsByNode[node]) == 0 {
+			delete(c.allocationsByNode, node)
+		}
 	}
+	delete(c.allocationsByBlock, blockCIDR)
 
-	// Delete the block.
-	delete(c.allocationsByBlock, key.CIDR.String())
+	// Remove from raw block storage.
+	delete(c.allBlocks, blockCIDR)
+	delete(c.nodesByBlock, blockCIDR)
 }
 
 func (c *ipamController) updateMetrics() {
@@ -508,8 +533,19 @@ func (c *ipamController) updateMetrics() {
 func (c *ipamController) reviewIPAMState() ([]string, error) {
 	// For each node present in IPAM, if it doesn't exist in the Kubernetes API then we
 	// should consider it a candidate for cleanup.
+	nodesAndAllocations := map[string]map[string]*allocation{}
+	for _, node := range c.nodesByBlock {
+		// For each affine block, add an entry. This makes sure we consider them even
+		// if they have no allocations.
+		nodesAndAllocations[node] = nil
+	}
+	for node, allocations := range c.allocationsByNode {
+		// For each allocation, add an entry. This make sure we condier them even
+		// if the node has no affine blocks.
+		nodesAndAllocations[node] = allocations
+	}
 	nodesToRelease := []string{}
-	for cnode, allocations := range c.allocationsByNode {
+	for cnode, allocations := range nodesAndAllocations {
 		// Lookup the corresponding Kubernetes node for each Calico node we found in IPAM.
 		// In KDD mode, these are identical. However, in etcd mode its possible that the Calico node has a
 		// different name from the Kubernetes node.
@@ -729,6 +765,12 @@ func (c *ipamController) allocationIsValid(a *allocation, preferCache bool) bool
 }
 
 func (c *ipamController) syncIPAM() error {
+	// Skip if not InSync yet.
+	if c.syncStatus != bapi.InSync {
+		log.Debug("Have not yet received InSync notification, skipping IPAM sync.")
+		return nil
+	}
+
 	// Check if any nodes in IPAM need to have affinities released.
 	log.Debug("Synchronizing IPAM data")
 	nodesToRelease, err := c.reviewIPAMState()
@@ -791,6 +833,9 @@ func (c *ipamController) garbageCollectIPs() error {
 		// No longer a leak. Remove it from the map here so we're not dependent on receiving
 		// the update from the syncer (which we will do eventually, this is just cleaner).
 		delete(c.allocationsByNode[a.node()], handle)
+		if len(c.allocationsByNode[a.node()]) == 0 {
+			delete(c.allocationsByNode, a.node())
+		}
 		delete(c.confirmedLeaks, handle)
 	}
 	return nil
@@ -806,8 +851,8 @@ func (c *ipamController) cleanupNode(cnode string) error {
 		logc.WithError(err).Errorf("Failed to release block affinities for node")
 		return err
 	}
-	logc.Debug("Released all affinities for node")
 
+	logc.Debug("Released all affinities for node")
 	return nil
 }
 
@@ -853,4 +898,22 @@ func (c *ipamController) kubernetesNodeForCalico(cnode string) (string, error) {
 
 func ordinalToIP(b *model.AllocationBlock, ord int) net.IP {
 	return b.OrdinalToIP(ord).IP
+}
+
+type stateRequest struct {
+	pauseConfirmed chan struct{}
+	doneChan       chan struct{}
+}
+
+// pause pauses the controller's main loop until the returned function is called.
+// this function is for TESTING PURPOSES ONLY, allowing the tests to safely access
+// the controller's data caches without races.
+func (c *ipamController) pause() func() {
+	doneChan := make(chan struct{})
+	pauseConfirmed := make(chan struct{})
+	c.readState <- stateRequest{doneChan: doneChan, pauseConfirmed: pauseConfirmed}
+	<-pauseConfirmed
+	return func() {
+		doneChan <- struct{}{}
+	}
 }

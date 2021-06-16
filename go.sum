@@ -606,7 +606,9 @@ github.com/projectcalico/libcalico-go v1.7.2-0.20210615230551-bf16e8eb2116 h1:K3
 github.com/projectcalico/libcalico-go v1.7.2-0.20210615230551-bf16e8eb2116/go.mod h1:tZ6l8knmT1InYf9skUZDRzV/Gnu/Hc+4BEDCH8q/W4E=
 github.com/projectcalico/logrus v1.0.4-calico h1:bHJ2KLGTFzoWpRISe13CO7HVxxrKunDjyUz/wFiBY8c=
 github.com/projectcalico/logrus v1.0.4-calico/go.mod h1:DfgrchabbtEO9wjOz5lVae+XRvjFKKWEA9GTMme6A8g=
+github.com/projectcalico/pod2daemon v0.0.0-20210421215417-6a02764eed37/go.mod h1:96lk2GRh7Z5QdPGRmZMC6DRxEOToaAlS+emdl4WiMPM=
 github.com/projectcalico/pod2daemon v0.0.0-20210528184151-6b0d4d6c18cf/go.mod h1:96lk2GRh7Z5QdPGRmZMC6DRxEOToaAlS+emdl4WiMPM=
+github.com/projectcalico/typha v0.7.3-0.20210512195227-b25be64ff3a2/go.mod h1:OFzwsWXbN0xLrcnn0YhD9+H9txeXdbmWEwWd9u68SKY=
 github.com/projectcalico/typha v0.7.3-0.20210524104642-ae095e9e80f3 h1:HU0dZQ/QJGEhqOZVj5M4afUXoxcySU6EMzUWYz8hUgw=
 github.com/projectcalico/typha v0.7.3-0.20210524104642-ae095e9e80f3/go.mod h1:mVNuS8JuYSYgs90NUlfrcw0SVVXZ1T2Tr+wSe8TVYs4=
 github.com/prometheus/client_golang v0.9.1/go.mod h1:7SWBe2y4D6OKWSNQJUaRYU/AaXPKyh/dDVn+NZz0KFw=
@@ -1125,6 +1127,7 @@ honnef.co/go/tools v0.0.1-2020.1.4 h1:UoveltGrhghAA7ePc+e+QYDHXrBps2PqFZiHkGR/xK
 honnef.co/go/tools v0.0.1-2020.1.4/go.mod h1:X/FiERA/W4tHapMX5mGpAtMSVEeEUOyHaw9vFzvIQ3k=
 k8s.io/api v0.21.0-rc.0 h1:t/kW96KdNJNamYNqxaxRirahK+FaWJQ6BJPbXm5Jb+o=
 k8s.io/api v0.21.0-rc.0/go.mod h1:Dkc/ZauWJrgZhjOjeBgW89xZQiTBJA2RaBKYHXPsi2Y=
+k8s.io/apiextensions-apiserver v0.21.0-rc.0 h1:gxeak4PvTBhuiZagZRFv9WyNnAdG39/VCmI9XTwVCRk=
 k8s.io/apiextensions-apiserver v0.21.0-rc.0/go.mod h1:ItIoMBJU1gy93Qwr/B2699r4b0VmZqAOU+15BvozxMY=
 k8s.io/apimachinery v0.21.0-rc.0 h1:m9dyzHb8QZAHOZKIz2SiabSif1oLsfgrnwiago/9xJA=
 k8s.io/apimachinery v0.21.0-rc.0/go.mod h1:jbreFvJo3ov9rj7eWT7+sYiRx+qZuCYXwWT1bcDswPY=
@@ -1161,7 +1164,9 @@ k8s.io/kube-proxy v0.21.0-rc.0/go.mod h1:RsunWkTxSTFUwa0vPSmdZ9KpMtkX8EoqCUa3U6N
 k8s.io/kube-scheduler v0.21.0-rc.0/go.mod h1:B0s6QYIGM5wQ0mRBgbHFE2elYFirabCNKF42+bZUfOI=
 k8s.io/kubectl v0.21.0-rc.0/go.mod h1:eOKzb5p2/9pNzt2TQpVSzfB/41W6ZMm0JbJEIvyH08U=
 k8s.io/kubelet v0.21.0-rc.0/go.mod h1:wNcXzTVpecPLZq0/4Ns21YMDI8ni9Sr+ifCaQom+z+8=
+k8s.io/kubernetes v1.21.0-rc.0 h1:cKYhnzhY6My/9bE6nqUwlBDfMf2HAjR8mbsVJ5TnIug=
 k8s.io/kubernetes v1.21.0-rc.0/go.mod h1:Yx6XZ8zalyqEk7but+j4+5SvLzdyH1eeqZ4cwO+5dD4=
+k8s.io/kubernetes v1.21.2 h1:7r1wYSBaMwleFy/VIhdte8G8TUJTmx+MR6Ip2ZsF4NM=
 k8s.io/legacy-cloud-providers v0.21.0-rc.0/go.mod h1:C9CAgvDYih3dfSF0v+ahAVD8SB4YDfOmnIztTEvng5Y=
 k8s.io/metrics v0.21.0-rc.0/go.mod h1:iCF67TNbrhChr/eb99uHt0H1hE7Rd1EC2Ic/yknzIE4=
 k8s.io/mount-utils v0.21.0-rc.0/go.mod h1:dwXbIPxKtTjrBEaX1aK/CMEf1KZ8GzMHpe3NEBfdFXI=
