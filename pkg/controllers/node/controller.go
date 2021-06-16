@@ -188,9 +188,6 @@ func (c *NodeController) Run(stopCh chan struct{}) {
 
 	log.Info("Starting Node controller")
 
-	// Register metrics.
-	registerPrometheusMetrics()
-
 	// Wait till k8s cache is synced
 	log.Debug("Waiting to sync with Kubernetes API (Nodes and Pods)")
 	for !c.nodeInformer.HasSynced() || !c.podInformer.HasSynced() {
