@@ -18,6 +18,7 @@ require (
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20201125193152-8a03d2e9614b
 	honnef.co/go/tools v0.0.1-2020.1.4 // indirect
 	k8s.io/api v0.21.0-rc.0
+	k8s.io/apiextensions-apiserver v0.0.0
 	k8s.io/apimachinery v0.21.0-rc.0
 	k8s.io/apiserver v0.21.0-rc.0
 	k8s.io/client-go v0.21.0-rc.0
