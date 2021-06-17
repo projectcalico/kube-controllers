@@ -76,6 +76,24 @@ func init() {
 	prometheus.MustRegister(blocksGauge)
 }
 
+type syncerUpdateType string
+
+const (
+	updateTypeNode   syncerUpdateType = "NodeUpdate"
+	updateTypeBlock  syncerUpdateType = "BlockUpdate"
+	updateTypeStatus syncerUpdateType = "StatusUpdate"
+)
+
+// syncerUpdate is a messanger struct used to send updates received from the syncer
+// to the main worker goroutine. We combine all updates from the syncer into a single
+// channel in order to preserve message order.
+type syncerUpdate struct {
+	updateType syncerUpdateType
+	node       model.KVPair
+	block      model.KVPair
+	syncStatus bapi.SyncStatus
+}
+
 func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs kubernetes.Interface) *ipamController {
 	return &ipamController{
 		client:    c,
@@ -83,13 +101,13 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs k
 		config:    cfg,
 		rl:        workqueue.DefaultControllerRateLimiter(),
 
-		syncChan:     make(chan interface{}, 1),
-		statusUpdate: make(chan bapi.SyncStatus),
+		syncChan: make(chan interface{}, 1),
+
+		// Channel for updates
 
 		// Buffered channels for potentially bursty channels.
-		blockUpdate: make(chan model.KVPair, batchUpdateSize),
-		nodeUpdate:  make(chan model.KVPair, 1000),
-		podUpdate:   make(chan podUpdate, 1000),
+		syncerUpdates: make(chan syncerUpdate, batchUpdateSize),
+		podUpdate:     make(chan podUpdate, batchUpdateSize),
 
 		allBlocks:                   make(map[string]model.KVPair),
 		allocationsByBlock:          make(map[string]map[string]*allocation),
@@ -119,11 +137,10 @@ type ipamController struct {
 	// syncChan triggers processing in response to an update.
 	syncChan chan interface{}
 
-	// For block update / deletion events.
-	blockUpdate  chan model.KVPair
-	nodeUpdate   chan model.KVPair
-	statusUpdate chan bapi.SyncStatus
-	podUpdate    chan podUpdate
+	// For update / deletion events from the syncer.
+	syncerUpdates chan syncerUpdate
+
+	podUpdate chan podUpdate
 
 	// Raw block storage.
 	allBlocks map[string]model.KVPair
@@ -152,7 +169,10 @@ func (c *ipamController) RegisterWith(f *DataFeed) {
 }
 
 func (c *ipamController) onStatusUpdate(s bapi.SyncStatus) {
-	c.statusUpdate <- s
+	c.syncerUpdates <- syncerUpdate{
+		updateType: updateTypeStatus,
+		syncStatus: s,
+	}
 }
 
 func (c *ipamController) onUpdate(update bapi.Update) {
@@ -160,12 +180,16 @@ func (c *ipamController) onUpdate(update bapi.Update) {
 	case model.ResourceKey:
 		switch update.KVPair.Key.(model.ResourceKey).Kind {
 		case apiv3.KindNode:
-			c.nodeUpdate <- update.KVPair
+			c.syncerUpdates <- syncerUpdate{
+				updateType: updateTypeNode,
+				node:       update.KVPair,
+			}
 		}
-
 	case model.BlockKey:
-		// We send all block updates to the same place no matter the type.
-		c.blockUpdate <- update.KVPair
+		c.syncerUpdates <- syncerUpdate{
+			updateType: updateTypeBlock,
+			block:      update.KVPair,
+		}
 	default:
 		logrus.Warnf("Unexpected kind received over syncer: %s", update.KVPair.Key)
 	}
@@ -212,58 +236,24 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 					break
 				}
 			}
-		case s := <-c.statusUpdate:
-			// Before we do anything, we need to drain the other syncer channels.
-		drainLoop:
-			for {
-				select {
-				case kvp := <-c.nodeUpdate:
-					c.handleNodeUpdate(kvp)
-				case kvp := <-c.blockUpdate:
-					c.handleBlockUpdate(kvp)
-				default:
-					break drainLoop
-				}
-			}
-
-			c.syncStatus = s
-			switch s {
-			case bapi.InSync:
-				log.WithField("status", s).Info("Syncer is InSync, kicking sync channel")
-				kick(c.syncChan)
-			}
-		case kvp := <-c.nodeUpdate:
-			c.handleNodeUpdate(kvp)
-
-			// It's possible we get a rapid series of updates in a row. Use
-			// a consolidation loop to handle "batches" of updates before triggering a sync.
-		nodeConsolidationLoop:
-			for i := 1; i < batchUpdateSize; i++ {
-				select {
-				case kvp = <-c.nodeUpdate:
-					c.handleNodeUpdate(kvp)
-				default:
-					break nodeConsolidationLoop
-				}
-			}
-		case kvp := <-c.blockUpdate:
-			c.handleBlockUpdate(kvp)
+		case upd := <-c.syncerUpdates:
+			c.handleUpdate(upd)
 
 			// It's possible we get a rapid series of updates in a row. Use
 			// a consolidation loop to handle "batches" of updates before triggering a sync.
 			var i int
-		blockConsolidationLoop:
+		consolidationLoop:
 			for i = 1; i < batchUpdateSize; i++ {
 				select {
-				case kvp = <-c.blockUpdate:
-					c.handleBlockUpdate(kvp)
+				case upd = <-c.syncerUpdates:
+					c.handleUpdate(upd)
 				default:
-					break blockConsolidationLoop
+					break consolidationLoop
 				}
 			}
 
 			// Kick the sync channel to trigger a resync after handling a batch.
-			log.WithField("batchSize", i).Debug("Triggering sync after batch of block updates")
+			log.WithField("batchSize", i).Debug("Triggering sync after batch of updates")
 			kick(c.syncChan)
 		case <-t.C:
 			// Periodic IPAM sync.
@@ -285,7 +275,6 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 			}
 
 			// Update prometheus metrics.
-			// TODO: Do we need / want to do this every sync? Can we batch?
 			c.updateMetrics()
 			log.Debug("Triggered IPAM sync complete")
 		case req := <-c.pauseRequestChannel:
@@ -296,6 +285,26 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 		case <-stopCh:
 			return
 		}
+	}
+}
+
+// handleUpdate fans out proper handling of the update depending on the
+// information in the update.
+func (c *ipamController) handleUpdate(upd syncerUpdate) {
+	switch upd.updateType {
+	case updateTypeStatus:
+		c.syncStatus = upd.syncStatus
+		switch upd.syncStatus {
+		case bapi.InSync:
+			log.WithField("status", upd.syncStatus).Info("Syncer is InSync, kicking sync channel")
+			kick(c.syncChan)
+		}
+	case updateTypeNode:
+		c.handleNodeUpdate(upd.node)
+	case updateTypeBlock:
+		c.handleBlockUpdate(upd.block)
+	default:
+		log.WithField("type", upd.updateType).Warn("Unhandled update type from syncer")
 	}
 }
 
