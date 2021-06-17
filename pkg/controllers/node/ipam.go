@@ -45,8 +45,6 @@ var (
 	ipsGauge      *prometheus.GaugeVec
 	blocksGauge   *prometheus.GaugeVec
 	borrowedGauge *prometheus.GaugeVec
-
-	metricsRegistered bool
 )
 
 const (
@@ -55,30 +53,27 @@ const (
 	batchUpdateSize = 1000
 )
 
-func registerPrometheusMetrics() {
-	if !metricsRegistered {
-		// Total IP allocations.
-		ipsGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "ipam_allocations_per_node",
-			Help: "Number of IPs allocated",
-		}, []string{"node"})
-		prometheus.MustRegister(ipsGauge)
+func init() {
+	// Total IP allocations.
+	ipsGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "ipam_allocations_per_node",
+		Help: "Number of IPs allocated",
+	}, []string{"node"})
+	prometheus.MustRegister(ipsGauge)
 
-		// Borrowed IPs.
-		borrowedGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "ipam_allocations_borrowed_per_node",
-			Help: "Number of allocated IPs that are from non-affine blocks.",
-		}, []string{"node"})
-		prometheus.MustRegister(borrowedGauge)
+	// Borrowed IPs.
+	borrowedGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "ipam_allocations_borrowed_per_node",
+		Help: "Number of allocated IPs that are from non-affine blocks.",
+	}, []string{"node"})
+	prometheus.MustRegister(borrowedGauge)
 
-		// Blocks per-node.
-		blocksGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "ipam_blocks_per_node",
-			Help: "Number of blocks in IPAM",
-		}, []string{"node"})
-		prometheus.MustRegister(blocksGauge)
-	}
-	metricsRegistered = true
+	// Blocks per-node.
+	blocksGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "ipam_blocks_per_node",
+		Help: "Number of blocks in IPAM",
+	}, []string{"node"})
+	prometheus.MustRegister(blocksGauge)
 }
 
 func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs kubernetes.Interface) *ipamController {
@@ -147,9 +142,6 @@ type ipamController struct {
 }
 
 func (c *ipamController) Start(stop chan struct{}) {
-	// Register metrics.
-	registerPrometheusMetrics()
-
 	go c.acceptScheduleRequests(stop)
 }
 
@@ -221,6 +213,19 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 				}
 			}
 		case s := <-c.statusUpdate:
+			// Before we do anything, we need to drain the other syncer channels.
+		drainLoop:
+			for {
+				select {
+				case kvp := <-c.nodeUpdate:
+					c.handleNodeUpdate(kvp)
+				case kvp := <-c.blockUpdate:
+					c.handleBlockUpdate(kvp)
+				default:
+					break drainLoop
+				}
+			}
+
 			c.syncStatus = s
 			switch s {
 			case bapi.InSync:
@@ -232,13 +237,13 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 
 			// It's possible we get a rapid series of updates in a row. Use
 			// a consolidation loop to handle "batches" of updates before triggering a sync.
-			var i int
-			for i = 1; i < batchUpdateSize; i++ {
+		nodeConsolidationLoop:
+			for i := 1; i < batchUpdateSize; i++ {
 				select {
 				case kvp = <-c.nodeUpdate:
 					c.handleNodeUpdate(kvp)
 				default:
-					break
+					break nodeConsolidationLoop
 				}
 			}
 		case kvp := <-c.blockUpdate:
@@ -247,12 +252,13 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 			// It's possible we get a rapid series of updates in a row. Use
 			// a consolidation loop to handle "batches" of updates before triggering a sync.
 			var i int
+		blockConsolidationLoop:
 			for i = 1; i < batchUpdateSize; i++ {
 				select {
 				case kvp = <-c.blockUpdate:
 					c.handleBlockUpdate(kvp)
 				default:
-					break
+					break blockConsolidationLoop
 				}
 			}
 
@@ -309,6 +315,13 @@ func (c *ipamController) handleNodeUpdate(kvp model.KVPair) {
 		kn, err := getK8sNodeName(*n)
 		if err != nil {
 			log.WithError(err).Info("Unable to get corresponding k8s node name, skipping")
+
+			// It's posible that a previous version of this node had an orchRef and so was added to the
+			// map. If so, we need to remove it.
+			if current, ok := c.kubernetesNodesByCalicoName[n.Name]; ok {
+				logrus.Warnf("Update mapping calico node -> k8s node. %s -> %s (previously %s)", n.Name, kn, current)
+				delete(c.kubernetesNodesByCalicoName, n.Name)
+			}
 		} else if kn != "" {
 			if current, ok := c.kubernetesNodesByCalicoName[n.Name]; !ok {
 				logrus.Debugf("Add mapping calico node -> k8s node. %s -> %s", n.Name, kn)
@@ -618,6 +631,10 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 			if a.isConfirmedLeak() {
 				// If the address is determined to be a confirmed leak, add it to the index.
 				c.confirmedLeaks[a.handle] = a
+			} else if _, ok := c.confirmedLeaks[a.handle]; ok {
+				// Address used to be a leak, but is no longer.
+				logc.Info("Leaked IP has been resurrected")
+				delete(c.confirmedLeaks, a.handle)
 			}
 		}
 
@@ -684,7 +701,7 @@ func (c *ipamController) allocationIsValid(a *allocation, preferCache bool) bool
 			return false
 		}
 
-		// Proactively eep our cache up-to-date.
+		// Proactively keep our cache up-to-date.
 		c.podCache[key] = p
 	}
 
@@ -799,7 +816,9 @@ func (c *ipamController) garbageCollectIPs() error {
 		// Final check that the allocation is leaked, this time ignoring our cache
 		// to make sure we're working with up-to-date information.
 		if c.allocationIsValid(a, false) {
-			logc.Info("Leaked IP has been resurrected")
+			logc.Info("Leaked IP has been resurrected after querying latest state")
+			delete(c.confirmedLeaks, handle)
+			a.markValid()
 			continue
 		}
 

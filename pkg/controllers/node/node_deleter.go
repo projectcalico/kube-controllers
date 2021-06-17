@@ -50,7 +50,10 @@ func (c *nodeDeleter) RegisterWith(f *DataFeed) {
 func (c *nodeDeleter) OnKubernetesNodeDeleted() {
 	// When a Kubernetes node is deleted, trigger a sync.
 	log.Debug("Kubernetes node deletion event")
-	c.deleteStaleNodes()
+	err := c.deleteStaleNodes()
+	if err != nil {
+		log.WithError(err).Warn("Error deleting any stale nodes")
+	}
 }
 
 // deleteStaleNodes compares the set of Calico and Kubernetes nodes and deletes and nodes
