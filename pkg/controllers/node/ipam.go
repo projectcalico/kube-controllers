@@ -76,24 +76,6 @@ func init() {
 	prometheus.MustRegister(blocksGauge)
 }
 
-type syncerUpdateType string
-
-const (
-	updateTypeNode   syncerUpdateType = "NodeUpdate"
-	updateTypeBlock  syncerUpdateType = "BlockUpdate"
-	updateTypeStatus syncerUpdateType = "StatusUpdate"
-)
-
-// syncerUpdate is a messanger struct used to send updates received from the syncer
-// to the main worker goroutine. We combine all updates from the syncer into a single
-// channel in order to preserve message order.
-type syncerUpdate struct {
-	updateType syncerUpdateType
-	node       model.KVPair
-	block      model.KVPair
-	syncStatus bapi.SyncStatus
-}
-
 func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs kubernetes.Interface) *ipamController {
 	return &ipamController{
 		client:    c,
@@ -106,7 +88,7 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs k
 		// Channel for updates
 
 		// Buffered channels for potentially bursty channels.
-		syncerUpdates: make(chan syncerUpdate, batchUpdateSize),
+		syncerUpdates: make(chan interface{}, batchUpdateSize),
 		podUpdate:     make(chan podUpdate, batchUpdateSize),
 
 		allBlocks:                   make(map[string]model.KVPair),
@@ -138,7 +120,7 @@ type ipamController struct {
 	syncChan chan interface{}
 
 	// For update / deletion events from the syncer.
-	syncerUpdates chan syncerUpdate
+	syncerUpdates chan interface{}
 
 	podUpdate chan podUpdate
 
@@ -169,10 +151,7 @@ func (c *ipamController) RegisterWith(f *DataFeed) {
 }
 
 func (c *ipamController) onStatusUpdate(s bapi.SyncStatus) {
-	c.syncerUpdates <- syncerUpdate{
-		updateType: updateTypeStatus,
-		syncStatus: s,
-	}
+	c.syncerUpdates <- s
 }
 
 func (c *ipamController) onUpdate(update bapi.Update) {
@@ -180,16 +159,10 @@ func (c *ipamController) onUpdate(update bapi.Update) {
 	case model.ResourceKey:
 		switch update.KVPair.Key.(model.ResourceKey).Kind {
 		case apiv3.KindNode:
-			c.syncerUpdates <- syncerUpdate{
-				updateType: updateTypeNode,
-				node:       update.KVPair,
-			}
+			c.syncerUpdates <- update.KVPair
 		}
 	case model.BlockKey:
-		c.syncerUpdates <- syncerUpdate{
-			updateType: updateTypeBlock,
-			block:      update.KVPair,
-		}
+		c.syncerUpdates <- update.KVPair
 	default:
 		logrus.Warnf("Unexpected kind received over syncer: %s", update.KVPair.Key)
 	}
@@ -290,22 +263,30 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 
 // handleUpdate fans out proper handling of the update depending on the
 // information in the update.
-func (c *ipamController) handleUpdate(upd syncerUpdate) {
-	switch upd.updateType {
-	case updateTypeStatus:
-		c.syncStatus = upd.syncStatus
-		switch upd.syncStatus {
+func (c *ipamController) handleUpdate(upd interface{}) {
+	switch upd := upd.(type) {
+	case bapi.SyncStatus:
+		c.syncStatus = upd
+		switch upd {
 		case bapi.InSync:
-			log.WithField("status", upd.syncStatus).Info("Syncer is InSync, kicking sync channel")
+			log.WithField("status", upd).Info("Syncer is InSync, kicking sync channel")
 			kick(c.syncChan)
 		}
-	case updateTypeNode:
-		c.handleNodeUpdate(upd.node)
-	case updateTypeBlock:
-		c.handleBlockUpdate(upd.block)
-	default:
-		log.WithField("type", upd.updateType).Warn("Unhandled update type from syncer")
+		return
+	case model.KVPair:
+		switch upd.Key.(type) {
+		case model.ResourceKey:
+			switch upd.Key.(model.ResourceKey).Kind {
+			case apiv3.KindNode:
+				c.handleNodeUpdate(upd)
+				return
+			}
+		case model.BlockKey:
+			c.handleBlockUpdate(upd)
+			return
+		}
 	}
+	log.WithField("update", upd).Warn("Unexpected update received")
 }
 
 // handleBlockUpdate wraps up the logic to execute when receiving a block update.
