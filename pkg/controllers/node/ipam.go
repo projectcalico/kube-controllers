@@ -613,7 +613,7 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 				// - The node the allocation belongs to no longer exists.
 				// - There pod owning this allocation no longer exists.
 				a.markConfirmedLeak()
-			} else if c.config.LeakGracePeriod != nil && c.config.LeakGracePeriod.Duration > 0 {
+			} else if c.config.LeakGracePeriod != nil {
 				// The allocation is NOT valid, but the Kubernetes node still exists, so our confidence is lower.
 				// Mark as a candidate leak. If this state remains, it will switch
 				// to confirmed after the grace period.

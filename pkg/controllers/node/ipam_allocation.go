@@ -71,7 +71,12 @@ func (a *allocation) markLeak(leakGracePeriod time.Duration) {
 	}
 
 	if time.Since(*a.leakedAt) > leakGracePeriod && !a.isConfirmedLeak() {
-		a.markConfirmedLeak()
+		if leakGracePeriod > 0 {
+			// If the duration is 0, that means the user has turned off IPAM GC.
+			// We don't want to mark as a confirmed leak. We still allow marking as a candidate
+			// leak for informational purposes.
+			a.markConfirmedLeak()
+		}
 	}
 }
 
