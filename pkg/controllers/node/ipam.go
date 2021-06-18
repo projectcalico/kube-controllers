@@ -188,7 +188,9 @@ func (c *ipamController) acceptScheduleRequests(stopCh <-chan struct{}) {
 	// Periodic sync ticker.
 	period := 5 * time.Minute
 	if c.config.LeakGracePeriod != nil {
-		period = c.config.LeakGracePeriod.Duration / 2
+		if c.config.LeakGracePeriod.Duration > 0 {
+			period = c.config.LeakGracePeriod.Duration / 2
+		}
 	}
 	t := time.NewTicker(period)
 	log.Infof("Will run periodic IPAM sync every %s", period)
@@ -611,7 +613,7 @@ func (c *ipamController) reviewIPAMState() ([]string, error) {
 				// - The node the allocation belongs to no longer exists.
 				// - There pod owning this allocation no longer exists.
 				a.markConfirmedLeak()
-			} else if c.config.LeakGracePeriod != nil {
+			} else if c.config.LeakGracePeriod != nil && c.config.LeakGracePeriod.Duration > 0 {
 				// The allocation is NOT valid, but the Kubernetes node still exists, so our confidence is lower.
 				// Mark as a candidate leak. If this state remains, it will switch
 				// to confirmed after the grace period.

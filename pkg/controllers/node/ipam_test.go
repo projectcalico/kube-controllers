@@ -540,4 +540,78 @@ var _ = Describe("IPAM controller UTs", func() {
 			return c.nodesByBlock["10.0.0.0/30"]
 		}, 1*time.Second, 100*time.Millisecond).Should(Equal(""))
 	})
+
+	It("should not clean up leaked addresses if no grace period set", func() {
+		// Set the controller's grace period to 0.
+		c.config.LeakGracePeriod = &metav1.Duration{Duration: 0 * time.Second}
+
+		// Add a new block with one allocation - on a valid node but no corresponding pod.
+		n := apiv3.Node{}
+		n.Name = "cnode"
+		n.Spec.OrchRefs = []apiv3.OrchRef{{NodeName: "kname", Orchestrator: apiv3.OrchestratorKubernetes}}
+		_, err := cli.Nodes().Create(context.TODO(), &n, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Add the matching Kubernetes node.
+		kn := v1.Node{}
+		kn.Name = "kname"
+		_, err = cs.CoreV1().Nodes().Create(context.TODO(), &kn, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Start the controller.
+		c.Start(make(chan struct{}))
+
+		idx := 0
+		handle := "test-handle"
+		cidr := net.MustParseCIDR("10.0.0.0/30")
+		aff := "host:cnode"
+		key := model.BlockKey{CIDR: cidr}
+		b := model.AllocationBlock{
+			CIDR:        cidr,
+			Affinity:    &aff,
+			Allocations: []*int{&idx, nil, nil, nil},
+			Unallocated: []int{1, 2, 3},
+			Attributes: []model.AllocationAttribute{
+				{
+					AttrPrimary: &handle,
+					AttrSecondary: map[string]string{
+						ipam.AttributeNode:      "cnode",
+						ipam.AttributePod:       "test-pod",
+						ipam.AttributeNamespace: "test-namespace",
+					},
+				},
+			},
+		}
+		kvp := model.KVPair{
+			Key:   key,
+			Value: &b,
+		}
+		blockCIDR := kvp.Key.(model.BlockKey).CIDR.String()
+		update := bapi.Update{KVPair: kvp, UpdateType: bapi.UpdateTypeKVNew}
+		c.onUpdate(update)
+
+		// Wait for internal caches to update.
+		Eventually(func() bool {
+			done := c.pause()
+			defer done()
+			_, ok := c.allBlocks[blockCIDR]
+			return ok
+		}, 1*time.Second, 100*time.Millisecond).Should(BeTrue())
+
+		// Mark the syncer as InSync so that the GC will be triggered.
+		c.onStatusUpdate(bapi.InSync)
+
+		// Confirm the IP was NOT released. We start the controller with a 5s reconcile period,
+		// so this should take at most 15s.
+		fakeClient := cli.IPAM().(*fakeIPAMClient)
+		Eventually(func() bool {
+			return fakeClient.handlesReleased[handle]
+		}, 15*time.Second, 100*time.Millisecond).Should(BeFalse())
+
+		// The block should remain.
+		Consistently(func() bool {
+			return fakeClient.affinityReleased("cnode")
+		}, 5*time.Second, 100*time.Millisecond).Should(BeFalse())
+	})
+
 })
