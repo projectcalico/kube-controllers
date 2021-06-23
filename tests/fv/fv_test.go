@@ -876,7 +876,7 @@ var _ = Describe("kube-controllers FV tests", func() {
 			}
 			wepName, err := wepIDs.CalculateWorkloadEndpointName(false)
 			Expect(err).NotTo(HaveOccurred())
-			wep := api.NewWorkloadEndpoint()
+			wep := libapi.NewWorkloadEndpoint()
 			wep.Name = wepName
 			wep.Namespace = podNamespace
 			wep.Labels = map[string]string{
@@ -1048,7 +1048,7 @@ var _ = Describe("kube-controllers FV tests", func() {
 			}
 			wepName, err := wepIDs.CalculateWorkloadEndpointName(false)
 			Expect(err).NotTo(HaveOccurred())
-			wep := api.NewWorkloadEndpoint()
+			wep := libapi.NewWorkloadEndpoint()
 			wep.Name = wepName
 			wep.Namespace = podNamespace
 			wep.Labels = map[string]string{
