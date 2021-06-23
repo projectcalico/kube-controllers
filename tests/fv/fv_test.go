@@ -335,7 +335,7 @@ var _ = Describe("kube-controllers FV tests", func() {
 					Name:      "caliconodename-k8s-mypod-mywep",
 					Namespace: "default",
 				},
-				Spec: api.WorkloadEndpointSpec{
+				Spec: libapi.WorkloadEndpointSpec{
 					InterfaceName: "eth0",
 					Pod:           "mypod",
 					Endpoint:      "mywep",
@@ -884,7 +884,7 @@ var _ = Describe("kube-controllers FV tests", func() {
 				"projectcalico.org/namespace":    podNamespace,
 				"projectcalico.org/orchestrator": api.OrchestratorKubernetes,
 			}
-			wep.Spec = api.WorkloadEndpointSpec{
+			wep.Spec = libapi.WorkloadEndpointSpec{
 				ContainerID:   "container-id-1",
 				Orchestrator:  "k8s",
 				Pod:           podName,
@@ -1056,7 +1056,7 @@ var _ = Describe("kube-controllers FV tests", func() {
 				"projectcalico.org/namespace":    podNamespace,
 				"projectcalico.org/orchestrator": api.OrchestratorKubernetes,
 			}
-			wep.Spec = api.WorkloadEndpointSpec{
+			wep.Spec = libapi.WorkloadEndpointSpec{
 				ContainerID:   "container-id-1",
 				Orchestrator:  "k8s",
 				Pod:           podName,
