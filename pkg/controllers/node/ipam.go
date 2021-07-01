@@ -29,6 +29,7 @@ import (
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
+	cnet "github.com/projectcalico/libcalico-go/lib/net"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
@@ -97,6 +98,8 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs k
 		confirmedLeaks:              make(map[string]*allocation),
 		podCache:                    make(map[string]*v1.Pod),
 		nodesByBlock:                make(map[string]string),
+		blocksByNode:                make(map[string]map[string]bool),
+		emptyBlocks:                 make(map[string]string),
 
 		// For unit testing purposes.
 		pauseRequestChannel: make(chan pauseRequest),
@@ -130,6 +133,8 @@ type ipamController struct {
 	allocationsByBlock map[string]map[string]*allocation
 	allocationsByNode  map[string]map[string]*allocation
 	nodesByBlock       map[string]string
+	blocksByNode       map[string]map[string]bool
+	emptyBlocks        map[string]string
 	confirmedLeaks     map[string]*allocation
 
 	// Cache pods to avoid unnecessary API queries.
@@ -349,14 +354,19 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 	// Include affinity if it exists. We want to track nodes even
 	// if there are no IPs actually assigned to that node so that we can
 	// release their affinity if needed.
+	var n string
 	if b.Affinity != nil {
 		if strings.HasPrefix(*b.Affinity, "host:") {
-			n := strings.TrimPrefix(*b.Affinity, "host:")
+			n = strings.TrimPrefix(*b.Affinity, "host:")
 			c.nodesByBlock[blockCIDR] = n
+			c.blocksByNode[n][blockCIDR] = true
 		}
 	} else {
 		// Affinity may have been removed.
-		delete(c.nodesByBlock, blockCIDR)
+		if n, ok := c.nodesByBlock[blockCIDR]; ok {
+			delete(c.nodesByBlock, blockCIDR)
+			delete(c.blocksByNode[n], blockCIDR)
+		}
 	}
 
 	// Update allocations contributed from this block.
@@ -400,6 +410,13 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 			c.allocationsByNode[node][handle] = &alloc
 		}
 		log.WithFields(alloc.fields()).Debug("New IP allocation")
+	}
+
+	// If the block is empty, mark it as such. We'll check if it needs to be
+	// cleaned up in the sync loop.
+	delete(c.emptyBlocks, blockCIDR)
+	if n != "" && len(allocatedHandles) == 0 {
+		c.emptyBlocks[blockCIDR] = n
 	}
 
 	// Remove any previously assigned allocations that have since been released.
@@ -501,7 +518,31 @@ func (c *ipamController) updateMetrics() {
 	log.Debug("IPAM metrics updated")
 }
 
-// reviewIPAMState scans Calico IPAM and determines if any IPs appear to be leaks, and if any nodes should have their
+// checkEmptyBlocks looks at known empty blocks, and releases their affinity
+// if appropriate. A block is a candidate for having its affinity released if:
+// - The block is empty
+// - The block's node has at least one other affine block.
+func (c *ipamController) checkEmptyBlocks() error {
+	for blockCIDR, node := range c.emptyBlocks {
+		logc := log.WithFields(log.Fields{"blockCIDR": blockCIDR, "node": node})
+		nodeBlocks := c.blocksByNode[node]
+		if len(nodeBlocks) > 1 {
+			// The node has more than one block. We can release the empty one.
+			logc.Info("Releasing affinity for empty block (node has %d total blocks)", len(nodeBlocks))
+			_, cidr, err := cnet.ParseCIDR(blockCIDR)
+			if err != nil {
+				return err
+			}
+			err = c.client.IPAM().ReleaseAffinity(context.TODO(), *cidr, node, true)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkAllocations scans Calico IPAM and determines if any IPs appear to be leaks, and if any nodes should have their
 // block affinities released.
 //
 // An IP allocation is a candidate for GC when:
@@ -517,7 +558,7 @@ func (c *ipamController) updateMetrics() {
 // - There are no longer any IP allocations on the node, OR
 // - The remaining IP allocations on the node are all determined to be leaked IP addresses.
 // TODO: We're effectively iterating every allocation in the cluster on every execution. Can we optimize? Or at least rate-limit?
-func (c *ipamController) reviewIPAMState() ([]string, error) {
+func (c *ipamController) checkAllocations() ([]string, error) {
 	// For each node present in IPAM, if it doesn't exist in the Kubernetes API then we
 	// should consider it a candidate for cleanup.
 	nodesAndAllocations := map[string]map[string]*allocation{}
@@ -764,13 +805,19 @@ func (c *ipamController) syncIPAM() error {
 
 	// Check if any nodes in IPAM need to have affinities released.
 	log.Debug("Synchronizing IPAM data")
-	nodesToRelease, err := c.reviewIPAMState()
+	nodesToRelease, err := c.checkAllocations()
 	if err != nil {
 		return err
 	}
 
 	// Release all confirmed leaks.
 	err = c.garbageCollectIPs()
+	if err != nil {
+		return err
+	}
+
+	// Check if any empty blocks should be removed.
+	err = c.checkEmptyBlocks()
 	if err != nil {
 		return err
 	}
