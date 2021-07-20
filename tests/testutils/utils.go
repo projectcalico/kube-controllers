@@ -97,8 +97,12 @@ func GetCalicoClient(dsType apiconfig.DatastoreType, etcdIP, kcfg string) client
 	cfg.Spec.DatastoreType = dsType
 	cfg.Spec.EtcdEndpoints = fmt.Sprintf("http://%s:2379", etcdIP)
 	cfg.Spec.Kubeconfig = kcfg
-	client, err := client.New(*cfg)
 
+	// Override the QPS since the tests may need to perform lots
+	// of operations in quick succession.
+	cfg.Spec.K8sClientQPS = float32(1000)
+
+	client, err := client.New(*cfg)
 	Expect(err).NotTo(HaveOccurred())
 	return client
 }
