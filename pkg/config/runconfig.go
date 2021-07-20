@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/libcalico-go/lib/watch"
 
 	log "github.com/sirupsen/logrus"
@@ -84,6 +85,7 @@ type ControllersConfig struct {
 	WorkloadEndpoint *GenericControllerConfig
 	ServiceAccount   *GenericControllerConfig
 	Namespace        *GenericControllerConfig
+	RouteReflector   *RouteReflectorControllerConfig
 }
 
 type GenericControllerConfig struct {
@@ -102,6 +104,23 @@ type NodeControllerConfig struct {
 	// The grace period used by the controller to determine if an IP address is leaked.
 	// Set to 0 to disable IP address garbage collection.
 	LeakGracePeriod *v1.Duration
+}
+
+type RouteReflectorControllerConfig struct {
+	DatastoreType    apiconfig.DatastoreType
+	ReconcilerPeriod time.Duration
+
+	TopologyType             *string
+	ClusterID                *string
+	Min                      *int
+	Max                      *int
+	Ratio                    *float32
+	RouteReflectorsPerNode   *int
+	RouteReflectorLabelKey   *string
+	RouteReflectorLabelValue *string
+	ZoneLabel                *string
+	HostnameLabel            *string
+	IncompatibleLabels       *string
 }
 
 type RunConfigController struct {
@@ -348,6 +367,37 @@ func mergeConfig(envVars map[string]string, envCfg Config, apiCfg v3.KubeControl
 	if rc.Namespace != nil {
 		rc.Namespace.NumberOfWorkers = envCfg.ProfileWorkers
 	}
+	if rc.RouteReflector != nil {
+		var dsType apiconfig.DatastoreType
+		switch envCfg.DatastoreType {
+		case string(apiconfig.Kubernetes):
+			dsType = apiconfig.Kubernetes
+		case string(apiconfig.EtcdV3):
+			dsType = apiconfig.EtcdV3
+		}
+		rc.RouteReflector.DatastoreType = dsType
+
+		// TODO find a better way to map
+
+		if apiCfg.Controllers.RouteReflector != nil {
+			if apiCfg.Controllers.RouteReflector.ReconcilerPeriod != nil {
+				rc.RouteReflector.ReconcilerPeriod = apiCfg.Controllers.RouteReflector.ReconcilerPeriod.Duration
+			} else {
+				rc.RouteReflector.ReconcilerPeriod = v1.Duration{Duration: time.Minute * 5}.Duration
+			}
+			rc.RouteReflector.TopologyType = apiCfg.Controllers.RouteReflector.TopologyType
+			rc.RouteReflector.ClusterID = apiCfg.Controllers.RouteReflector.ClusterID
+			rc.RouteReflector.Min = apiCfg.Controllers.RouteReflector.Min
+			rc.RouteReflector.Max = apiCfg.Controllers.RouteReflector.Max
+			rc.RouteReflector.Ratio = apiCfg.Controllers.RouteReflector.Ratio
+			rc.RouteReflector.RouteReflectorsPerNode = apiCfg.Controllers.RouteReflector.RouteReflectorsPerNode
+			rc.RouteReflector.RouteReflectorLabelKey = apiCfg.Controllers.RouteReflector.RouteReflectorLabelKey
+			rc.RouteReflector.RouteReflectorLabelValue = apiCfg.Controllers.RouteReflector.RouteReflectorLabelValue
+			rc.RouteReflector.ZoneLabel = apiCfg.Controllers.RouteReflector.ZoneLabel
+			rc.RouteReflector.HostnameLabel = apiCfg.Controllers.RouteReflector.HostnameLabel
+			rc.RouteReflector.IncompatibleLabels = apiCfg.Controllers.RouteReflector.IncompatibleLabels
+		}
+	}
 
 	return rCfg, status
 }
@@ -502,6 +552,7 @@ func mergeEnabledControllers(envVars map[string]string, status *v3.KubeControlle
 	w := ac.WorkloadEndpoint
 	s := ac.ServiceAccount
 	ns := ac.Namespace
+	rr := ac.RouteReflector
 
 	v, p := envVars[EnvEnabledControllers]
 	if p {
@@ -523,6 +574,9 @@ func mergeEnabledControllers(envVars map[string]string, status *v3.KubeControlle
 			case "serviceaccount":
 				rc.ServiceAccount = &GenericControllerConfig{}
 				sc.ServiceAccount = &v3.ServiceAccountControllerConfig{}
+			case "routereflector":
+				rc.RouteReflector = &RouteReflectorControllerConfig{}
+				sc.RouteReflector = &v3.RouteReflectorControllerConfig{}
 			case "flannelmigration":
 				log.WithField(EnvEnabledControllers, v).Fatal("cannot run flannelmigration with other controllers")
 			default:
@@ -595,6 +649,14 @@ func mergeEnabledControllers(envVars map[string]string, status *v3.KubeControlle
 			rc.ServiceAccount.ReconcilerPeriod = s.ReconcilerPeriod.Duration
 		}
 		sc.ServiceAccount.ReconcilerPeriod = s.ReconcilerPeriod
+	}
+	if rc.RouteReflector != nil && rr != nil {
+		if rr.ReconcilerPeriod == nil {
+			rc.RouteReflector.ReconcilerPeriod = time.Minute * 5
+		} else {
+			rc.RouteReflector.ReconcilerPeriod = rr.ReconcilerPeriod.Duration
+		}
+		sc.RouteReflector.ReconcilerPeriod = rr.ReconcilerPeriod
 	}
 }
 
