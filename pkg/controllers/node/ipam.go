@@ -359,6 +359,9 @@ func (c *ipamController) onBlockUpdated(kvp model.KVPair) {
 		if strings.HasPrefix(*b.Affinity, "host:") {
 			n = strings.TrimPrefix(*b.Affinity, "host:")
 			c.nodesByBlock[blockCIDR] = n
+			if _, ok := c.blocksByNode[n]; !ok {
+				c.blocksByNode[n] = map[string]bool{}
+			}
 			c.blocksByNode[n][blockCIDR] = true
 		}
 	} else {
@@ -531,10 +534,26 @@ func (c *ipamController) checkEmptyBlocks() error {
 			// The node has more than one block. Check that the other blocks allocated to this node
 			// are not at capacity. We only release blocks when there's room in the other affine blocks,
 			// otherwise the next IP allcation will just assign a new block to this node anyway.
-			// TODO
+			numAddressesAvailableOnNode := 0
+			for b := range nodeBlocks {
+				if b == blockCIDR {
+					// Skip the known empty block.
+					continue
+				}
+
+				// Sum the number of unallocated addresses across the other blocks.
+				kvp := c.allBlocks[b]
+				numAddressesAvailableOnNode += len(kvp.Value.(*model.AllocationBlock).Unallocated)
+			}
+
+			// Make sure there are some addresses available before releasing.
+			if numAddressesAvailableOnNode < 2 {
+				logc.Debug("Block is still needed, skip release")
+				continue
+			}
 
 			// We can release the empty one.
-			logc.Info("Releasing affinity for empty block (node has %d total blocks)", len(nodeBlocks))
+			logc.Infof("Releasing affinity for empty block (node has %d total blocks)", len(nodeBlocks))
 			_, cidr, err := cnet.ParseCIDR(blockCIDR)
 			if err != nil {
 				return err
@@ -550,6 +569,8 @@ func (c *ipamController) checkEmptyBlocks() error {
 			// accidentally release all of the node's blocks.
 			delete(c.emptyBlocks, blockCIDR)
 			delete(c.blocksByNode[node], blockCIDR)
+			delete(c.nodesByBlock, blockCIDR)
+			delete(c.allBlocks, blockCIDR)
 		}
 	}
 	return nil
