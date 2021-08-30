@@ -848,12 +848,7 @@ func (c *ipamController) syncIPAM() error {
 	// Query latest handle state. We get all handles prior to calculating leaks so that
 	// if the allocation changes between the start of the sync loop and the end, we'll
 	// get a CAS error when attempting to release any handle that has changed since this point.
-	// TODO: Remove need for backend client.
-	type accessor interface {
-		Backend() bapi.Client
-	}
-	bc := c.client.(accessor).Backend()
-	handleList, err := bc.List(context.Background(), model.IPAMHandleListOptions{}, "")
+	handleList, err := c.client.IPAM().ListHandles(context.Background())
 	if err != nil {
 		return err
 	}
