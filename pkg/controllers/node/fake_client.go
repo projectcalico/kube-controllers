@@ -7,6 +7,7 @@ import (
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/clientv3"
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
@@ -226,10 +227,11 @@ func (f *fakeIPAMClient) IPsByHandle(ctx context.Context, handleID string) ([]cn
 // ReleaseByHandle releases all IP addresses that have been assigned
 // using the provided handle.  Returns an error if no addresses
 // are assigned with the given handle.
-func (f *fakeIPAMClient) ReleaseByHandle(ctx context.Context, handleID string) error {
+func (f *fakeIPAMClient) ReleaseByHandle(ctx context.Context, obj *model.KVPair) error {
 	f.Lock()
 	defer f.Unlock()
 
+	handleID := obj.Value.(*model.IPAMHandle).HandleID
 	f.handlesReleased[handleID] = true
 	return nil
 }
