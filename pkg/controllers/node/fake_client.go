@@ -23,6 +23,7 @@ func NewFakeCalicoClient() *FakeCalicoClient {
 	ipamClient := fakeIPAMClient{
 		affinitiesReleased: make(map[string]bool),
 		handlesReleased:    make(map[string]bool),
+		handleList:         &model.KVPairList{KVPairs: nil},
 	}
 	return &FakeCalicoClient{
 		nodeClient: &nc,
@@ -175,6 +176,23 @@ type fakeIPAMClient struct {
 	sync.Mutex
 	affinitiesReleased map[string]bool
 	handlesReleased    map[string]bool
+
+	// Populated by test code to be returned by the fake client.
+	handleList *model.KVPairList
+}
+
+// GetHandle returns the handle with the given ID.
+func (f *fakeIPAMClient) GetHandle(ctx context.Context, handleID string) (*model.KVPair, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// ListHandles returns all IPAM handles.
+func (f *fakeIPAMClient) ListHandles(ctx context.Context) (*model.KVPairList, error) {
+	return f.handleList, nil
+}
+
+func (f *fakeIPAMClient) SetHandles(h *model.KVPairList) {
+	f.handleList = h
 }
 
 func (f *fakeIPAMClient) affinityReleased(aff string) bool {
