@@ -7,6 +7,7 @@ import (
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/clientv3"
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
@@ -22,6 +23,7 @@ func NewFakeCalicoClient() *FakeCalicoClient {
 	ipamClient := fakeIPAMClient{
 		affinitiesReleased: make(map[string]bool),
 		handlesReleased:    make(map[string]bool),
+		handleList:         &model.KVPairList{KVPairs: nil},
 	}
 	return &FakeCalicoClient{
 		nodeClient: &nc,
@@ -174,6 +176,23 @@ type fakeIPAMClient struct {
 	sync.Mutex
 	affinitiesReleased map[string]bool
 	handlesReleased    map[string]bool
+
+	// Populated by test code to be returned by the fake client.
+	handleList *model.KVPairList
+}
+
+// GetHandle returns the handle with the given ID.
+func (f *fakeIPAMClient) GetHandle(ctx context.Context, handleID string) (*model.KVPair, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// ListHandles returns all IPAM handles.
+func (f *fakeIPAMClient) ListHandles(ctx context.Context) (*model.KVPairList, error) {
+	return f.handleList, nil
+}
+
+func (f *fakeIPAMClient) SetHandles(h *model.KVPairList) {
+	f.handleList = h
 }
 
 func (f *fakeIPAMClient) affinityReleased(aff string) bool {
@@ -226,10 +245,11 @@ func (f *fakeIPAMClient) IPsByHandle(ctx context.Context, handleID string) ([]cn
 // ReleaseByHandle releases all IP addresses that have been assigned
 // using the provided handle.  Returns an error if no addresses
 // are assigned with the given handle.
-func (f *fakeIPAMClient) ReleaseByHandle(ctx context.Context, handleID string) error {
+func (f *fakeIPAMClient) ReleaseByHandle(ctx context.Context, obj *model.KVPair) error {
 	f.Lock()
 	defer f.Unlock()
 
+	handleID := obj.Value.(*model.IPAMHandle).HandleID
 	f.handlesReleased[handleID] = true
 	return nil
 }

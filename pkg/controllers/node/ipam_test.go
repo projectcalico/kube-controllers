@@ -289,6 +289,17 @@ var _ = Describe("IPAM controller UTs", func() {
 		update := bapi.Update{KVPair: kvp, UpdateType: bapi.UpdateTypeKVNew}
 		c.onUpdate(update)
 
+		// Update the fake client with the handle for the allocation.
+		fakeClient := cli.IPAM().(*fakeIPAMClient)
+		fakeClient.SetHandles(&model.KVPairList{
+			KVPairs: []*model.KVPair{
+				{
+					Key:   model.IPAMHandleKey{HandleID: handle},
+					Value: &model.IPAMHandle{HandleID: handle},
+				},
+			},
+		})
+
 		// Wait for internal caches to update.
 		Eventually(func() bool {
 			done := c.pause()
@@ -305,7 +316,6 @@ var _ = Describe("IPAM controller UTs", func() {
 		c.OnKubernetesNodeDeleted()
 
 		// Confirm the IP and block affinity were released.
-		fakeClient := cli.IPAM().(*fakeIPAMClient)
 		Eventually(func() bool {
 			return fakeClient.handlesReleased[handle]
 		}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
@@ -360,6 +370,17 @@ var _ = Describe("IPAM controller UTs", func() {
 		update := bapi.Update{KVPair: kvp, UpdateType: bapi.UpdateTypeKVNew}
 		c.onUpdate(update)
 
+		// Update the fake client with the handle for the allocation.
+		fakeClient := cli.IPAM().(*fakeIPAMClient)
+		fakeClient.SetHandles(&model.KVPairList{
+			KVPairs: []*model.KVPair{
+				{
+					Key:   model.IPAMHandleKey{HandleID: handle},
+					Value: &model.IPAMHandle{HandleID: handle},
+				},
+			},
+		})
+
 		// Wait for internal caches to update.
 		Eventually(func() bool {
 			done := c.pause()
@@ -373,7 +394,6 @@ var _ = Describe("IPAM controller UTs", func() {
 
 		// Confirm the IP was released. We start the controller with a 5s reconcile period,
 		// so this should take at most 15s.
-		fakeClient := cli.IPAM().(*fakeIPAMClient)
 		Eventually(func() bool {
 			return fakeClient.handlesReleased[handle]
 		}, 15*time.Second, 100*time.Millisecond).Should(BeTrue())
