@@ -94,6 +94,7 @@ func NewIPAMController(cfg config.NodeControllerConfig, c client.Interface, cs k
 		allBlocks:                   make(map[string]model.KVPair),
 		allocationsByBlock:          make(map[string]map[string]*allocation),
 		allocationsByNode:           make(map[string]map[string]*allocation),
+		handlesByID:                 make(map[string]*model.KVPair),
 		kubernetesNodesByCalicoName: make(map[string]string),
 		confirmedLeaks:              make(map[string]*allocation),
 		podCache:                    make(map[string]*v1.Pod),
@@ -136,6 +137,7 @@ type ipamController struct {
 	blocksByNode       map[string]map[string]bool
 	emptyBlocks        map[string]string
 	confirmedLeaks     map[string]*allocation
+	handlesByID        map[string]*model.KVPair
 
 	// Cache pods to avoid unnecessary API queries.
 	podCache map[string]*v1.Pod
@@ -843,6 +845,25 @@ func (c *ipamController) syncIPAM() error {
 		return nil
 	}
 
+	// Query latest handle state. We get all handles prior to calculating leaks so that
+	// if the allocation changes between the start of the sync loop and the end, we'll
+	// get a CAS error when attempting to release any handle that has changed since this point.
+	// TODO: Remove need for backend client.
+	type accessor interface {
+		Backend() bapi.Client
+	}
+	bc := c.client.(accessor).Backend()
+	handleList, err := bc.List(context.Background(), model.IPAMHandleListOptions{}, "")
+	if err != nil {
+		return err
+	}
+	c.handlesByID = make(map[string]*model.KVPair, len(handleList.KVPairs))
+	for _, h := range handleList.KVPairs {
+		id := h.Key.(model.IPAMHandleKey).HandleID
+		c.handlesByID[id] = h
+		log.Infof("HandleID %s: -> %+v", id, h.Value)
+	}
+
 	// Check if any nodes in IPAM need to have affinities released.
 	log.Debug("Synchronizing IPAM data")
 	nodesToRelease, err := c.checkAllocations()
@@ -900,10 +921,20 @@ func (c *ipamController) garbageCollectIPs() error {
 			continue
 		}
 
+		h := c.handlesByID[a.handle]
+		if h == nil {
+			logc.Warnf("Unable to find handle for IP, skipping")
+			continue
+		}
+
 		logc.Info("Garbage collecting leaked IP address")
-		if err := c.client.IPAM().ReleaseByHandle(context.TODO(), a.handle); err != nil {
+		if err := c.client.IPAM().ReleaseByHandle(context.TODO(), h); err != nil {
 			if _, ok := err.(cerrors.ErrorResourceDoesNotExist); ok {
 				logc.WithField("handle", a.handle).Debug("IP already released")
+				continue
+			}
+			if _, ok := err.(cerrors.ErrorResourceUpdateConflict); ok {
+				logc.WithField("handle", a.handle).Debug("Handle modified since start of loop, skip")
 				continue
 			}
 			logc.WithError(err).WithField("handle", a.handle).Warning("Failed to release leaked IP")
