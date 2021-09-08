@@ -11,7 +11,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/projectcalico/api v0.0.0-20210908204226-36fbcf68f1c8
 	github.com/projectcalico/felix v0.0.0-20210908130812-1ac6ea7679a9
-	github.com/projectcalico/libcalico-go v1.7.2-0.20210908210009-4286b5210ea6
+	github.com/projectcalico/libcalico-go v1.7.2-0.20210908214348-194a10ce7182
 	github.com/prometheus/client_golang v1.7.1
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.7.0
@@ -23,6 +23,7 @@ require (
 	k8s.io/apiserver v0.21.0-rc.0
 	k8s.io/client-go v0.21.0-rc.0
 	k8s.io/klog v1.0.0
+	k8s.io/kube-openapi v0.0.0-20210817084001-7fbd8d59e5b8 // indirect
 )
 
 replace (
