@@ -106,6 +106,8 @@ github.com/blang/semver v3.5.1+incompatible/go.mod h1:kRBLl5iJ+tD4TcOOxsy/0fnweb
 github.com/boltdb/bolt v1.3.1/go.mod h1:clJnj/oiGkjum5o1McbSZDSLxVThjynRyGBgiAx27Ps=
 github.com/buger/jsonparser v0.0.0-20180808090653-f4dd9f5a6b44/go.mod h1:bbYlZJ7hK1yFx9hf58LP0zeX7UjIGs20ufpu3evjr+s=
 github.com/caddyserver/caddy v1.0.3/go.mod h1:G+ouvOY32gENkJC+jhgl62TyhvqEsFaDiZ4uw0RzP1E=
+github.com/caseydavenport/libcalico-go v0.0.0-20210910160822-f5c64312f225 h1:tKqh4gT3wPDotjT86MaB/rx34umm432PMk+hI4s916E=
+github.com/caseydavenport/libcalico-go v0.0.0-20210910160822-f5c64312f225/go.mod h1:8RAIMZSpngisOf99FJyHVOg6dTgzLHdSjLWsoAilENI=
 github.com/cenkalti/backoff v2.1.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/cespare/xxhash v1.1.0 h1:a6HrQnmkObjyL+Gs60czilIUGqrzKutQD6XZog3p+ko=
@@ -590,8 +592,6 @@ github.com/projectcalico/go-json v0.0.0-20161128004156-6219dc7339ba h1:aaF2byUCZ
 github.com/projectcalico/go-json v0.0.0-20161128004156-6219dc7339ba/go.mod h1:q8EdCgBdMQzgiX/uk4GXLWLk+gIHd1a7mWUAamJKDb4=
 github.com/projectcalico/go-yaml-wrapper v0.0.0-20191112210931-090425220c54 h1:Jt2Pic9dxgJisekm8q2WV9FaWxUJhhRfwHSP640drww=
 github.com/projectcalico/go-yaml-wrapper v0.0.0-20191112210931-090425220c54/go.mod h1:UgC0aTQ2KMDxlX3lU/stndk7DMUBJqzN40yFiILHgxc=
-github.com/projectcalico/libcalico-go v1.7.2-0.20210908214348-194a10ce7182 h1:RVM79Zkx6cvURAi36Z+dhznDx+tMNQHNvDXE45myDcw=
-github.com/projectcalico/libcalico-go v1.7.2-0.20210908214348-194a10ce7182/go.mod h1:8RAIMZSpngisOf99FJyHVOg6dTgzLHdSjLWsoAilENI=
 github.com/projectcalico/logrus v1.0.4-calico h1:bHJ2KLGTFzoWpRISe13CO7HVxxrKunDjyUz/wFiBY8c=
 github.com/projectcalico/logrus v1.0.4-calico/go.mod h1:DfgrchabbtEO9wjOz5lVae+XRvjFKKWEA9GTMme6A8g=
 github.com/projectcalico/pod2daemon v0.0.0-20210818162850-fa9ba6fd57c4/go.mod h1:96lk2GRh7Z5QdPGRmZMC6DRxEOToaAlS+emdl4WiMPM=
@@ -1126,7 +1126,6 @@ k8s.io/client-go v0.21.0-rc.0 h1:lsPZHT1ZniXJcwg2udlaTOhAT8wf7BE0rn9Vj0+LWMA=
 k8s.io/client-go v0.21.0-rc.0/go.mod h1:zU5HY/bSOKH3YOqoge9nFvICgrpeSdJu8DQ4fkjKIZk=
 k8s.io/cloud-provider v0.21.0-rc.0/go.mod h1:dXTEXZuesbZ0g2tXButYQlr5mVnQ6lmWGJyODVXKFTY=
 k8s.io/cluster-bootstrap v0.21.0-rc.0/go.mod h1:lsAFz54QLO/Eg1o2FmI9EreB+nEpY8KWiXXCpyhjnsQ=
-k8s.io/code-generator v0.21.0-rc.0 h1:5XqZwy0dHr3LssJ9ImpO8dCjdTvZ8Bw84b90dZ46kPk=
 k8s.io/code-generator v0.21.0-rc.0/go.mod h1:hUlps5+9QaTrKx+jiM4rmq7YmH8wPOIko64uZCHDh6Q=
 k8s.io/component-base v0.21.0-rc.0 h1:8YgFPDsIhRx7zCOxikZn77nYRnwxrc9aMiuQDJtK1+g=
 k8s.io/component-base v0.21.0-rc.0/go.mod h1:XlP0bM7QJFWRGZYPc5NmphkvsYQ+o7804HWH3GTGjDY=
@@ -1135,7 +1134,6 @@ k8s.io/controller-manager v0.21.0-rc.0/go.mod h1:K9485cOofmSjHGwNod14iRhLjNU65/A
 k8s.io/cri-api v0.21.0-rc.0/go.mod h1:nJbXlTpXwYCYuGMR7v3PQb1Du4WOGj2I9085xMVjr3I=
 k8s.io/csi-translation-lib v0.21.0-rc.0/go.mod h1:oG3Gth9/qb2RPjhoqJIZSPTqNqDt/rZFSLShuntPb90=
 k8s.io/gengo v0.0.0-20200413195148-3a45101e95ac/go.mod h1:ezvh/TsK7cY6rbqRK0oQQ8IAqLxYwwyPxAX1Pzy0ii0=
-k8s.io/gengo v0.0.0-20201214224949-b6c5ce23f027 h1:Uusb3oh8XcdzDF/ndlI4ToKTYVlkCSJP39SRY2mfRAw=
 k8s.io/gengo v0.0.0-20201214224949-b6c5ce23f027/go.mod h1:FiNAH4ZV3gBg2Kwh89tzAEV2be7d5xI0vBa/VySYy3E=
 k8s.io/heapster v1.2.0-beta.1/go.mod h1:h1uhptVXMwC8xtZBYsPXKVi8fpdlYkTs6k949KozGrM=
 k8s.io/klog v1.0.0 h1:Pt+yjF5aB1xDSVbau4VsWe+dQNzA0qv1LlXdC2dF6Q8=
