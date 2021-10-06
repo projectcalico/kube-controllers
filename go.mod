@@ -11,7 +11,7 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/projectcalico/api v0.0.0-20211005123650-be8650baf048
 	github.com/projectcalico/felix v0.0.0-20211006002504-5b2b00af96aa
-	github.com/projectcalico/libcalico-go v1.7.2-0.20211005125516-43b35ddc2f4a
+	github.com/projectcalico/libcalico-go v1.7.2-0.20211006144010-18285c8ad10a
 	github.com/prometheus/client_golang v1.7.1
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.7.0
