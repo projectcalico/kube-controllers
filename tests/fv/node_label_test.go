@@ -63,7 +63,7 @@ var _ = Describe("Node labeling tests", func() {
 		kconfigfile, err := ioutil.TempFile("", "ginkgo-policycontroller")
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kconfigfile.Name())
-		data := fmt.Sprintf(testutils.KubeconfigTemplate, apiserver.IP)
+		data := testutils.BuildKubeconfig(apiserver.IP)
 		_, err = kconfigfile.Write([]byte(data))
 		Expect(err).NotTo(HaveOccurred())
 
