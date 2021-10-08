@@ -164,7 +164,7 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 				stdoutStderr, _ := cmd.CombinedOutput()
 
 				return string(stdoutStderr)
-			}, 21*time.Second, 500*time.Millisecond).Should(ContainSubstring("Error reaching apiserver"))
+			}, 21*time.Second, 500*time.Millisecond).Should(ContainSubstring("Error verifying datastore"))
 		})
 	})
 
