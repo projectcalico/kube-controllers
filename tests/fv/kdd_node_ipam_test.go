@@ -67,7 +67,7 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 		kconfigfile, err = ioutil.TempFile("", "ginkgo-policycontroller")
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kconfigfile.Name())
-		data := fmt.Sprintf(testutils.KubeconfigTemplate, apiserver.IP)
+		data := testutils.BuildKubeconfig(apiserver.IP)
 		_, err = kconfigfile.Write([]byte(data))
 		Expect(err).NotTo(HaveOccurred())
 
@@ -164,7 +164,7 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 				stdoutStderr, _ := cmd.CombinedOutput()
 
 				return string(stdoutStderr)
-			}, 21*time.Second, 500*time.Millisecond).Should(ContainSubstring("Error reaching apiserver"))
+			}, 21*time.Second, 500*time.Millisecond).Should(ContainSubstring("Error verifying datastore"))
 		})
 	})
 
