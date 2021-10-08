@@ -78,6 +78,7 @@ func RunK8sApiserver(etcdIp string) *containers.Container {
 		containers.RunOpts{AutoRemove: true},
 		"-v", os.Getenv("CERTS")+":/home/user/certs", // Mount in location of certificates.
 		"-v", os.Getenv("CRDS")+":/crds",
+		"-e", "KUBECONFIG=/home/user/certs/kubeconfig", // We run kubectl from within this container.
 		os.Getenv("KUBE_IMAGE"),
 		"kube-apiserver",
 		"--v=0",
