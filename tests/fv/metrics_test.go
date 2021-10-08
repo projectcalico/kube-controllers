@@ -153,8 +153,11 @@ var _ = Describe("kube-controllers metrics tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Assert no IPAM metrics reported yet.
-		out, err := getMetrics(fmt.Sprintf("http://%s:9094/metrics", kubeControllers.IP))
-		Expect(err).NotTo(HaveOccurred())
+		var out string
+		Eventually(func() error {
+			out, err = getMetrics(fmt.Sprintf("http://%s:9094/metrics", kubeControllers.IP))
+			return err
+		}, 10*time.Second, 1*time.Second).ShouldNot(HaveOccurred())
 		Expect(out).NotTo(ContainSubstring("ipam_"))
 
 		// Allocate a pod IP address and thus a block and affinity to NodeA.
