@@ -16,7 +16,6 @@ package fv_test
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"time"
@@ -66,8 +65,7 @@ var _ = Describe("Auto Hostendpoint tests", func() {
 		var err error
 		kconfigFile, err = ioutil.TempFile("", "ginkgo-nodecontroller")
 		Expect(err).NotTo(HaveOccurred())
-		//defer os.Remove(kconfigFile.Name())
-		data := fmt.Sprintf(testutils.KubeconfigTemplate, apiserver.IP)
+		data := testutils.BuildKubeconfig(apiserver.IP)
 		_, err = kconfigFile.Write([]byte(data))
 		Expect(err).NotTo(HaveOccurred())
 

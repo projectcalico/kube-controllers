@@ -16,7 +16,6 @@ package fv_test
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"time"
@@ -60,17 +59,18 @@ var _ = Describe("kube-controllers IPAM FV tests (etcd mode)", func() {
 		// Run apiserver.
 		apiserver = testutils.RunK8sApiserver(etcd.IP)
 
-		// Write out a kubeconfig file
+		// Write out a kubeconfig file we can mount into the container.
 		var err error
 		kconfigFile, err = ioutil.TempFile("", "ginkgo-nodecontroller")
 		Expect(err).NotTo(HaveOccurred())
-		data := fmt.Sprintf(testutils.KubeconfigTemplate, apiserver.IP)
+		data := testutils.BuildKubeconfig(apiserver.IP)
 		_, err = kconfigFile.Write([]byte(data))
 		Expect(err).NotTo(HaveOccurred())
 
 		// Make the kubeconfig readable by the container.
 		Expect(kconfigFile.Chmod(os.ModePerm)).NotTo(HaveOccurred())
 
+		// Build a client we can use for the test.
 		k8sClient, err = testutils.GetK8sClient(kconfigFile.Name())
 		Expect(err).NotTo(HaveOccurred())
 
