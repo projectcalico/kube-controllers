@@ -82,7 +82,7 @@ var _ = Describe("kube-controllers IPAM FV tests (etcd mode)", func() {
 
 		// Run controller manager.  Empirically it can take around 10s until the
 		// controller manager is ready to create default service accounts, even
-		// when the hyperkube image has already been downloaded to run the API
+		// when the k8s image has already been downloaded to run the API
 		// server.  We use Eventually to allow for possible delay when doing
 		// initial pod creation below.
 		controllerManager = testutils.RunK8sControllerManager(apiserver.IP)
