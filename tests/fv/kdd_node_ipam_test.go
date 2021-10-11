@@ -67,7 +67,7 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 		kconfigfile, err = ioutil.TempFile("", "ginkgo-policycontroller")
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kconfigfile.Name())
-		data := fmt.Sprintf(testutils.KubeconfigTemplate, apiserver.IP)
+		data := testutils.BuildKubeconfig(apiserver.IP)
 		_, err = kconfigfile.Write([]byte(data))
 		Expect(err).NotTo(HaveOccurred())
 
@@ -82,6 +82,10 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 			_, err := k8sClient.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
 			return err
 		}, 30*time.Second, 1*time.Second).Should(BeNil())
+		Consistently(func() error {
+			_, err := k8sClient.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
+			return err
+		}, 10*time.Second, 1*time.Second).Should(BeNil())
 
 		// Apply the necessary CRDs. There can somtimes be a delay between starting
 		// the API server and when CRDs are apply-able, so retry here.
@@ -164,7 +168,7 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 				stdoutStderr, _ := cmd.CombinedOutput()
 
 				return string(stdoutStderr)
-			}, 21*time.Second, 500*time.Millisecond).Should(ContainSubstring("Error reaching apiserver"))
+			}, 21*time.Second, 500*time.Millisecond).Should(ContainSubstring("Error verifying datastore"))
 		})
 	})
 
