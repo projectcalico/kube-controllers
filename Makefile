@@ -49,6 +49,14 @@ endif
 
 SRC_FILES=cmd/kube-controllers/main.go $(shell find pkg -name '*.go')
 
+# We need CGO to leverage Boring SSL.  However, the cross-compile doesn't support CGO yet.
+# Currently CGO can be enbaled in ARM64 and AMD64 builds.
+ifeq ($(ARCH), $(filter $(ARCH),amd64 arm64))
+CGO_ENABLED=1
+else
+CGO_ENABLED=0
+endif
+
 ###############################################################################
 
 ## Removes all build artifacts.
@@ -80,11 +88,13 @@ sub-build-%:
 
 bin/kube-controllers-linux-$(ARCH): $(LOCAL_BUILD_DEP) $(SRC_FILES)
 	$(DOCKER_RUN) \
+	  -e CGO_ENABLED=$(CGO_ENABLED) \
 	  -v $(CURDIR)/bin:/go/src/$(PACKAGE_NAME)/bin \
 	  $(CALICO_BUILD) go build -v -o bin/kube-controllers-$(BUILDOS)-$(ARCH) -ldflags "-X main.VERSION=$(GIT_VERSION)" ./cmd/kube-controllers/
 
 bin/check-status-linux-$(ARCH): $(LOCAL_BUILD_DEP) $(SRC_FILES)
 	$(DOCKER_RUN) \
+	  -e CGO_ENABLED=$(CGO_ENABLED) \
 	  -v $(CURDIR)/bin:/go/src/$(PACKAGE_NAME)/bin \
 	  $(CALICO_BUILD) go build -v -o bin/check-status-$(BUILDOS)-$(ARCH) -ldflags "-X main.VERSION=$(GIT_VERSION)" ./cmd/check-status/
 
