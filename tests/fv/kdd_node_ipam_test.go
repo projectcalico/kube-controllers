@@ -19,8 +19,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
-	"strings"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -129,47 +127,6 @@ var _ = Describe("kube-controllers FV tests (KDD mode)", func() {
 		Expect(info.Spec.ClusterGUID).To(MatchRegexp("^[a-f0-9]{32}$"))
 		Expect(info.Spec.ClusterType).To(Equal("k8s,kdd"))
 		Expect(*info.Spec.DatastoreReady).To(BeTrue())
-	})
-
-	Context("Healthcheck FV tests", func() {
-		It("should pass health check", func() {
-			By("Waiting for an initial readiness report")
-			Eventually(func() []byte {
-				cmd := exec.Command("docker", "exec", policyController.Name, "/usr/bin/check-status", "-r")
-				stdoutStderr, _ := cmd.CombinedOutput()
-
-				return stdoutStderr
-			}, 20*time.Second, 500*time.Millisecond).ShouldNot(ContainSubstring("initialized to false"))
-
-			By("Waiting for the controller to be ready")
-			Eventually(func() string {
-				cmd := exec.Command("docker", "exec", policyController.Name, "/usr/bin/check-status", "-r")
-				stdoutStderr, _ := cmd.CombinedOutput()
-
-				return strings.TrimSpace(string(stdoutStderr))
-			}, 20*time.Second, 500*time.Millisecond).Should(Equal("Ready"))
-		})
-
-		It("should fail health check if apiserver is not running", func() {
-			By("Waiting for an initial readiness report")
-			Eventually(func() []byte {
-				cmd := exec.Command("docker", "exec", policyController.Name, "/usr/bin/check-status", "-r")
-				stdoutStderr, _ := cmd.CombinedOutput()
-
-				return stdoutStderr
-			}, 20*time.Second, 500*time.Millisecond).ShouldNot(ContainSubstring("initialized to false"))
-
-			By("Stopping the apiserver")
-			apiserver.Stop()
-
-			By("Waiting for the readiness to change")
-			Eventually(func() string {
-				cmd := exec.Command("docker", "exec", policyController.Name, "/usr/bin/check-status", "-r")
-				stdoutStderr, _ := cmd.CombinedOutput()
-
-				return string(stdoutStderr)
-			}, 21*time.Second, 500*time.Millisecond).Should(ContainSubstring("Error verifying datastore"))
-		})
 	})
 
 	Context("Mainline FV tests", func() {
