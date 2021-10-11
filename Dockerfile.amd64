@@ -35,6 +35,7 @@ LABEL name="Calico Kubernetes controllers" \
 
 COPY --from=base /licenses /licenses
 COPY --from=base /status /status
+COPY --from=base /usr/include /usr/include
 ADD bin/kube-controllers-linux-amd64 /usr/bin/kube-controllers
 ADD bin/check-status-linux-amd64 /usr/bin/check-status
 USER 999
