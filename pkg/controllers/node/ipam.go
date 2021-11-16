@@ -472,6 +472,10 @@ func (c *ipamController) onBlockDeleted(key model.BlockKey) {
 	delete(c.allocationsByBlock, blockCIDR)
 
 	// Remove from raw block storage.
+	if n := c.nodesByBlock[blockCIDR]; n != "" {
+		// The block was assigned to a node, make sure to update internal cache.
+		delete(c.blocksByNode[n], blockCIDR)
+	}
 	delete(c.allBlocks, blockCIDR)
 	delete(c.nodesByBlock, blockCIDR)
 	delete(c.emptyBlocks, blockCIDR)
@@ -550,7 +554,13 @@ func (c *ipamController) checkEmptyBlocks() error {
 		for b := range nodeBlocks {
 			if b == blockCIDR {
 				// Skip the known empty block.
+				logc.Info("CASEY: Skip block under consideration")
 				continue
+			}
+			logc.WithField("checking", b).Info("CASEY: Checking block that shares a node")
+
+			for kk, vv := range c.allBlocks {
+				logc.WithFields(log.Fields{"k": kk, "v": vv}).Info("CASEY: All blocks entry")
 			}
 
 			// Sum the number of unallocated addresses across the other blocks.
