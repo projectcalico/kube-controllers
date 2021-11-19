@@ -553,14 +553,16 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/pquerna/cachecontrol v0.0.0-20171018203845-0dec1b30a021/go.mod h1:prYjPmNq4d1NPVmpShWobRqXY3q7Vp+80DqgxxUrUIA=
 github.com/pquerna/ffjson v0.0.0-20180717144149-af8b230fcd20/go.mod h1:YARuvh7BUWHNhzDq2OM5tzR2RiCcN2D7sapiKyCel/M=
-github.com/projectcalico/felix v0.0.0-20210820104741-c7a9fc04d520 h1:RddWto+9r1LPY87mWhpg1+IilqdrHTiEKws8zE0/9LU=
-github.com/projectcalico/felix v0.0.0-20210820104741-c7a9fc04d520/go.mod h1:Odev2EbymG7K7d6+jrsj7mMYTgSeEnojDvXsKoPkMVA=
+github.com/projectcalico/felix v0.0.0-20211013133623-363ca5fd1fe3 h1:YVnapTGCTXT1IXbkTe1eTYXyLzEt6fIQwutXCAv6S24=
+github.com/projectcalico/felix v0.0.0-20211013133623-363ca5fd1fe3/go.mod h1:Odev2EbymG7K7d6+jrsj7mMYTgSeEnojDvXsKoPkMVA=
 github.com/projectcalico/go-json v0.0.0-20161128004156-6219dc7339ba h1:aaF2byUCZhzszHsfPEr2M3qcU4ibtD/yk/il2R7T1PU=
 github.com/projectcalico/go-json v0.0.0-20161128004156-6219dc7339ba/go.mod h1:q8EdCgBdMQzgiX/uk4GXLWLk+gIHd1a7mWUAamJKDb4=
 github.com/projectcalico/go-yaml-wrapper v0.0.0-20191112210931-090425220c54 h1:Jt2Pic9dxgJisekm8q2WV9FaWxUJhhRfwHSP640drww=
 github.com/projectcalico/go-yaml-wrapper v0.0.0-20191112210931-090425220c54/go.mod h1:UgC0aTQ2KMDxlX3lU/stndk7DMUBJqzN40yFiILHgxc=
 github.com/projectcalico/libcalico-go v1.7.2-0.20210728180911-2a96f2c631ea h1:VQ2MD2eHK9DrNeCsUt2LvnVirFo32q+y/H+3Rx8BOFU=
 github.com/projectcalico/libcalico-go v1.7.2-0.20210728180911-2a96f2c631ea/go.mod h1:epPDUZnPsAntcFWkbQ6cek7+DPLjzOQmMAaA7egfOMM=
+github.com/projectcalico/libcalico-go v1.7.2-0.20211119233600-e3f7c620522a h1:MOhxrPkjZZpA4W7xsXOmm7vhs9KpD0ggeYzbO4MYUlQ=
+github.com/projectcalico/libcalico-go v1.7.2-0.20211119233600-e3f7c620522a/go.mod h1:BVFYURL0HhDmHZpxqXWPRjne9hzTXQTrYdbhpA/JgmA=
 github.com/projectcalico/logrus v1.0.4-calico h1:bHJ2KLGTFzoWpRISe13CO7HVxxrKunDjyUz/wFiBY8c=
 github.com/projectcalico/logrus v1.0.4-calico/go.mod h1:DfgrchabbtEO9wjOz5lVae+XRvjFKKWEA9GTMme6A8g=
 github.com/projectcalico/pod2daemon v0.0.0-20210303175725-63bffe4262de/go.mod h1:96lk2GRh7Z5QdPGRmZMC6DRxEOToaAlS+emdl4WiMPM=
@@ -654,6 +656,7 @@ github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5
 github.com/subosito/gotenv v1.2.0/go.mod h1:N0PQaV/YGNqwC0u51sEeR/aUtSLEXKX9iv69rRypqCw=
 github.com/syndtr/gocapability v0.0.0-20180916011248-d98352740cb2/go.mod h1:hkRG7XYTFWNJGYcbNJQlaLq0fg1yr4J4t/NcTQtrfww=
 github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07/go.mod h1:kDXzergiv9cbyO7IOYJZWg1U88JhDg3PB6klq9Hg2pA=
+github.com/tchap/go-patricia/v2 v2.3.1/go.mod h1:VZRHKAb53DLaG+nA9EaYYiaEx6YztwDlLElMsnSHD4k=
 github.com/thecodeteam/goscaleio v0.1.0/go.mod h1:68sdkZAsK8bvEwBlbQnlLS+xU+hvLYM/iQ8KXej1AwM=
 github.com/tidwall/pretty v1.0.0/go.mod h1:XNkn88O1ChpSDQmQeStsy+sBenx6DDtFZJxhVysOjyk=
 github.com/timakin/bodyclose v0.0.0-20190721030226-87058b9bfcec/go.mod h1:Qimiffbc6q9tBWlVV6x0P9sat/ao1xEkREYPPj9hphk=
