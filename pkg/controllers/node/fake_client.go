@@ -16,10 +16,12 @@ package node
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/clientv3"
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
@@ -272,6 +274,18 @@ func (f *fakeIPAMClient) ReleaseAffinity(ctx context.Context, cidr cnet.IPNet, h
 	defer f.Unlock()
 
 	f.affinitiesReleased[fmt.Sprintf("%s/%s", cidr.String(), host)] = true
+	return nil
+}
+
+// ReleaseBlockAffinity releases the affinity of the exact block provided.
+func (f *fakeIPAMClient) ReleaseBlockAffinity(ctx context.Context, block *model.AllocationBlock, mustBeEmpty bool) error {
+	f.Lock()
+	defer f.Unlock()
+
+	cidr := block.CIDR.String()
+	host := strings.TrimPrefix("host:", *block.Affinity)
+	key := fmt.Sprintf("%s/%s", cidr, host)
+	f.affinitiesReleased[key] = true
 	return nil
 }
 
