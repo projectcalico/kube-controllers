@@ -31,6 +31,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	gocidr "github.com/apparentlymart/go-cidr/cidr"
+
 	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/kube-controllers/tests/testutils"

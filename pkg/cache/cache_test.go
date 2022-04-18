@@ -20,6 +20,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
 	"github.com/projectcalico/kube-controllers/pkg/cache"
 )
 
