@@ -20,6 +20,11 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/workqueue"
+
 	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 	"github.com/projectcalico/kube-controllers/pkg/config"
 	libapi "github.com/projectcalico/libcalico-go/lib/apis/v3"
@@ -30,10 +35,6 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/net"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/projectcalico/libcalico-go/lib/resources"
-	"github.com/sirupsen/logrus"
-	log "github.com/sirupsen/logrus"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/util/workqueue"
 )
 
 func NewAutoHEPController(c config.NodeControllerConfig, client client.Interface) *autoHostEndpointController {
