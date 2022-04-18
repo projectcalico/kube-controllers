@@ -41,6 +41,9 @@ Makefile.common.$(MAKE_BRANCH):
 
 include Makefile.common
 
+# Override K8S_VERSION to last available hyperkube.
+K8S_VERSION = v1.18.6
+
 HYPERKUBE_IMAGE?=gcr.io/google_containers/hyperkube-$(ARCH):$(K8S_VERSION)
 ETCD_IMAGE?=quay.io/coreos/etcd:$(ETCD_VERSION)-$(BUILDARCH)
 # If building on amd64 omit the arch in the container name.
